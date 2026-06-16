@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * Design tokens
+ * Raw values live in :root and flip under prefers-color-scheme: dark.
+ * @theme inline maps them to Tailwind utilities (bg-bg, text-fg, ...).
+ * All pairings are verified by scripts/contrast.mjs (WCAG 2.2 AA).
+ * ------------------------------------------------------------------ */
+:root {
+  /* Neutral surfaces — these flip in dark mode */
+  --bg: #fbf7f0; /* page background (warm paper) */
+  --fg: #16140f; /* default text */
+  --fg-soft: #4a4640; /* muted text, still >= 4.5:1 */
+  --line: #16140f; /* borders + hard shadows */
+  --surface: #ffffff; /* cards */
+  --link: #2d3dbf; /* inline links on paper */
+
+  /* Accent blocks — FIXED in both modes (their text colors are hard-coded
+     in components, never the theme --fg, so contrast holds when paper flips) */
+  --yellow: #ffd23f;
+  --pink: #ff5da2;
+  --blue: #2d3dbf;
+  --green: #0b6b45;
+  --ink: #16140f; /* fixed dark: text/borders that sit ON accent blocks */
+  --on-accent-light: #ffffff; /* text on blue / green */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14120d;
+    --fg: #fbf7f0;
+    --fg-soft: #cfc9bd;
+    --line: #fbf7f0;
+    --surface: #211e17;
+    --link: #8fb6ff;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-fg-soft: var(--fg-soft);
+  --color-line: var(--line);
+  --color-surface: var(--surface);
+  --color-link: var(--link);
+
+  --color-yellow: var(--yellow);
+  --color-pink: var(--pink);
+  --color-blue: var(--blue);
+  --color-green: var(--green);
+  --color-ink: var(--ink);
+  --color-on-accent: var(--on-accent-light);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+
+  /* Hard-offset shadows: solid color, zero blur — the neo-brutalist signature */
+  --shadow-brut: 5px 5px 0 0 var(--color-line);
+  --shadow-brut-lg: 8px 8px 0 0 var(--color-line);
+
+  --radius-none: 0px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Base
+ * ------------------------------------------------------------------ */
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-yellow);
+  color: var(--ink);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* ------------------------------------------------------------------ *
+ * Visible, on-brand focus ring on EVERY interactive element.
+ * Blue reads strongly on paper/yellow/pink/white. Elements sitting on a
+ * dark/blue/green ground opt into a yellow ring with .focus-bright.
+ * ------------------------------------------------------------------ */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-blue);
+  outline-offset: 3px;
+  border-radius: 0;
+}
+.focus-bright:focus-visible {
+  outline-color: var(--color-yellow);
+}
+
+/* ------------------------------------------------------------------ *
+ * Neo-brutalist component primitives
+ * ------------------------------------------------------------------ */
+@layer components {
+  .brut {
+    border: 3px solid var(--color-line);
+    border-radius: 0;
+  }
+  .brut-card {
+    border: 3px solid var(--color-line);
+    border-radius: 0;
+    box-shadow: var(--shadow-brut);
+  }
+  /* Accent surfaces always carry a dark border + dark shadow, regardless
+     of theme, so blocks stay crisp in dark mode. */
+  .brut-ink {
+    border-color: var(--ink);
+  }
+  .shadow-ink {
+    box-shadow: 5px 5px 0 0 var(--ink);
+  }
+  .shadow-ink-lg {
+    box-shadow: 8px 8px 0 0 var(--ink);
+  }
+
+  /* Tactile press: the shadow shrinks and the element sinks toward it. */
+  .brut-press {
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease;
+  }
+  .brut-press:hover {
+    transform: translate(2px, 2px);
+    box-shadow: 3px 3px 0 0 var(--color-line);
+  }
+  .brut-press:active {
+    transform: translate(5px, 5px);
+    box-shadow: 0 0 0 0 var(--color-line);
+  }
+  .brut-press.shadow-ink:hover {
+    box-shadow: 3px 3px 0 0 var(--ink);
+  }
+  .brut-press.shadow-ink:active {
+    box-shadow: 0 0 0 0 var(--ink);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Reduced motion — global, not per-component.
+ * Kills reveal/parallax transforms and snaps every transition. Motion
+ * components ALSO check useReducedMotion() so nothing starts off-screen.
+ * ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip link: hidden until focused, then pinned top-left and on-brand. */
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -100px;
+  z-index: 100;
+  background: var(--color-yellow);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 1rem;
+}
