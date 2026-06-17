@@ -3,22 +3,15 @@ import Link from "next/link";
 
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 import { AssistiveWaves } from "@/components/illustrations";
 import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Sign up",
-  description: `Create a ${SITE_NAME} account. Accounts aren't open yet — this is a preview of where sign-up will live.`,
+  description: `Create a ${SITE_NAME} account and run your first scan.`,
 };
 
-/**
- * Placeholder signup page. No auth backend yet.
- *
- * TODO(auth): wire to NextAuth/Auth.js — the stubbed submit handler lives in
- * components/auth/AuthForm.tsx; replace it with a registration call (POST the
- * fields, then signIn the new user). The <SessionProvider> and the post-signup
- * redirect belong in app/layout.tsx, not on this page.
- */
 export default function SignupPage() {
   return (
     <AuthShell
@@ -38,6 +31,7 @@ export default function SignupPage() {
         </p>
       }
     >
+      <GoogleSignIn />
       <AuthForm mode="signup" />
     </AuthShell>
   );

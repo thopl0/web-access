@@ -6,15 +6,16 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { CTA, NAV_LINKS, SITE_NAME } from "@/lib/site";
 import { Button } from "@/components/ui/Button";
+import { logout } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 
 /**
- * Site header. Auth-aware by design: the CTAs point at the scaffolded
- * /signup and /login routes. When real auth lands (NextAuth/Auth.js), swap
- * this for a session check and render an account menu in the authed state.
- * TODO(auth): read session here and branch on logged-in vs logged-out.
+ * Site header. Session state is resolved server-side in NavServer and passed in
+ * as `authed`: logged-out visitors see the Log in / Sign up CTAs; logged-in
+ * users see Dashboard + Log out. The Log out control is a Server-Action form so
+ * it works without JS.
  */
-export function Nav() {
+export function Nav({ authed = false }: { authed?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   // Closing on link click keeps the menu from lingering across navigations
@@ -64,12 +65,27 @@ export function Nav() {
 
         {/* Desktop CTAs */}
         <div className="hidden items-center gap-3 lg:flex">
-          <Button href={CTA.secondary.href} variant="outline" size="sm">
-            {CTA.secondary.label}
-          </Button>
-          <Button href={CTA.primary.href} variant="blue" size="sm">
-            {CTA.primary.label}
-          </Button>
+          {authed ? (
+            <>
+              <Button href="/dashboard" variant="outline" size="sm">
+                Dashboard
+              </Button>
+              <form action={logout}>
+                <Button type="submit" variant="blue" size="sm">
+                  Log out
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <Button href={CTA.secondary.href} variant="outline" size="sm">
+                {CTA.secondary.label}
+              </Button>
+              <Button href={CTA.primary.href} variant="blue" size="sm">
+                {CTA.primary.label}
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -118,12 +134,27 @@ export function Nav() {
             );
           })}
           <li className="mt-2 flex flex-col gap-3">
-            <Button href={CTA.secondary.href} variant="outline" onClick={close}>
-              {CTA.secondary.label}
-            </Button>
-            <Button href={CTA.primary.href} variant="blue" onClick={close}>
-              {CTA.primary.label}
-            </Button>
+            {authed ? (
+              <>
+                <Button href="/dashboard" variant="outline" onClick={close}>
+                  Dashboard
+                </Button>
+                <form action={logout} onSubmit={close}>
+                  <Button type="submit" variant="blue" className="w-full">
+                    Log out
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <>
+                <Button href={CTA.secondary.href} variant="outline" onClick={close}>
+                  {CTA.secondary.label}
+                </Button>
+                <Button href={CTA.primary.href} variant="blue" onClick={close}>
+                  {CTA.primary.label}
+                </Button>
+              </>
+            )}
           </li>
         </ul>
       </div>

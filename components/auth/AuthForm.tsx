@@ -1,56 +1,36 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
-import { Info } from "lucide-react";
+import { useActionState, useId } from "react";
+import { AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/Field";
+import { login, signup, type AuthFormState } from "@/app/actions/auth";
 
 type Mode = "login" | "signup";
 
 /**
- * Placeholder auth form shared by /login and /signup. There is NO auth backend
- * yet — this collects the right fields with correct labels/autocomplete and,
- * on submit, tells the visitor honestly that accounts aren't live.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * TODO(auth): wire to NextAuth/Auth.js — replace this stubbed handler with
- * signIn()/registration call.
- *
- * When real auth lands:
- *   - login:  call `signIn("credentials", { email, password, redirectTo })`
- *             (or your provider) instead of the stub below.
- *   - signup: POST { name, email, password } to the registration endpoint,
- *             then sign the new user in.
- *   - On success, redirect to the post-auth destination (e.g. router.push("/")
- *             or rely on Auth.js `redirectTo`). The <SessionProvider> for client
- *             session access belongs in app/layout.tsx (or a providers wrapper),
- *             NOT here.
- *   - Surface real server errors via the same inline status region below
- *             (swap role="status" for role="alert" on actual failures).
- * ─────────────────────────────────────────────────────────────────────────────
+ * Auth form shared by /login and /signup. Wired to the real Server Actions in
+ * app/actions/auth.ts via useActionState: on success the action redirects to
+ * /dashboard; on failure it returns field/_form errors surfaced inline below
+ * (the TextField component handles per-field role="alert" + aria-invalid).
  */
 export function AuthForm({ mode }: { mode: Mode }) {
   const uid = useId();
   const fieldId = (name: string) => `${uid}-${name}`;
   const statusId = `${uid}-status`;
 
-  const [submitted, setSubmitted] = useState(false);
-  const statusRef = useRef<HTMLParagraphElement>(null);
-
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    // No backend yet: never actually submit. Keep the page honest.
-    event.preventDefault();
-
-    // TODO(auth): replace everything below with the real signIn()/register call.
-    setSubmitted(true);
-    requestAnimationFrame(() => statusRef.current?.focus());
-  }
-
   const isSignup = mode === "signup";
+  const action = isSignup ? signup : login;
+  const [state, formAction, pending] = useActionState<AuthFormState, FormData>(
+    action,
+    undefined,
+  );
+
+  const formError = state?.errors?._form?.[0];
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+    <form action={formAction} noValidate className="flex flex-col gap-5">
       {isSignup ? (
         <TextField
           id={fieldId("name")}
@@ -59,6 +39,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           type="text"
           autoComplete="name"
           hint="What should we call you?"
+          error={state?.errors?.name?.[0]}
         />
       ) : null}
 
@@ -70,6 +51,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         required
         autoComplete="email"
         placeholder="you@example.com"
+        error={state?.errors?.email?.[0]}
       />
 
       <TextField
@@ -79,34 +61,39 @@ export function AuthForm({ mode }: { mode: Mode }) {
         type="password"
         required
         autoComplete={isSignup ? "new-password" : "current-password"}
+        hint={isSignup ? "At least 8 characters." : undefined}
+        error={state?.errors?.password?.[0]}
       />
 
       {!isSignup ? (
-        // TODO(auth): make this a real <Link> to the password-reset flow once
-        // accounts exist. Until then it's plain text, not a dead/disabled link
-        // that traps keyboard focus and goes nowhere.
+        // TODO(auth): wire to a real password-reset flow when it exists. Until
+        // then it's plain text, not a dead link that traps keyboard focus.
         <p className="-mt-1 text-sm text-fg-soft">
-          Password resets arrive with accounts.
+          Forgot your password? Reset is coming soon.
         </p>
       ) : null}
 
-      <Button type="submit" variant="blue" size="lg" className="w-full">
-        {isSignup ? "Create account" : "Log in"}
+      <Button type="submit" variant="blue" size="lg" className="w-full" disabled={pending}>
+        {pending
+          ? isSignup
+            ? "Creating account…"
+            : "Logging in…"
+          : isSignup
+            ? "Create account"
+            : "Log in"}
       </Button>
 
-      {/* Inline, honest status. Announced politely; focusable so keyboard and
-          screen-reader users land on it after the stubbed submit. */}
+      {/* Form-level error (e.g. wrong credentials). Announced assertively. */}
       <p
         id={statusId}
-        ref={statusRef}
-        role="status"
-        tabIndex={-1}
-        className="min-h-[1.5rem] text-sm font-bold text-fg outline-none focus-visible:outline-3 focus-visible:outline-[var(--color-blue)] focus-visible:outline-offset-2"
+        role="alert"
+        aria-live="assertive"
+        className="min-h-[1.5rem] text-sm font-bold text-pink"
       >
-        {submitted ? (
+        {formError ? (
           <span className="inline-flex items-center gap-1.5">
-            <Info className="size-4 shrink-0" strokeWidth={2.75} aria-hidden="true" />
-            Accounts aren&apos;t live yet — nothing was sent. Hang tight.
+            <AlertCircle className="size-4 shrink-0" strokeWidth={2.75} aria-hidden="true" />
+            {formError}
           </span>
         ) : null}
       </p>

@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import { Section } from "@/components/ui/Section";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/motion/Reveal";
 
 /**
@@ -11,9 +10,9 @@ import { Reveal } from "@/components/motion/Reveal";
  */
 
 /**
- * Shared chrome for the /login and /signup placeholder pages: a centered
- * brutalist Card inside a Section, with a single <h1>, an honest "Coming soon"
- * note, and a slot for the actual form + footer links.
+ * Shared chrome for the /login and /signup pages: a centered brutalist Card
+ * inside a Section, with a single <h1>, an intro line, and a slot for the actual
+ * form + footer links.
  *
  * This is a Server Component — the interactive form lives in AuthForm, which
  * each page passes in as `children`.
@@ -47,18 +46,11 @@ export function AuthShell({
               {illustration}
             </div>
           ) : null}
-          <Badge tone="yellow">Coming soon</Badge>
-          <h1 id={titleId} className="mt-5 text-4xl sm:text-5xl text-fg">
+          <h1 id={titleId} className="text-4xl sm:text-5xl text-fg">
             {title}
           </h1>
           <p className="mt-4 text-lg text-fg-soft">{intro}</p>
         </div>
-
-        {/* Honest note: accounts aren't open yet. Not a fake logged-in state. */}
-        <p className="mt-6 text-center text-sm text-fg-soft">
-          Accounts aren&apos;t open yet — this is a preview of where they&apos;ll
-          live.
-        </p>
 
         <Card tone="surface" className="mt-6">
           {children}

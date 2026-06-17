@@ -3,21 +3,15 @@ import Link from "next/link";
 
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 import { KeyboardNav } from "@/components/illustrations";
 import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Log in",
-  description: `Sign in to ${SITE_NAME}. Accounts aren't open yet — this is a preview of where logging in will live.`,
+  description: `Sign in to your ${SITE_NAME} account.`,
 };
 
-/**
- * Placeholder login page. No auth backend yet.
- *
- * TODO(auth): wire to NextAuth/Auth.js — the stubbed submit handler lives in
- * components/auth/AuthForm.tsx; replace it with signIn(). The <SessionProvider>
- * and any post-login redirect belong in app/layout.tsx, not on this page.
- */
 export default function LoginPage() {
   return (
     <AuthShell
@@ -37,6 +31,7 @@ export default function LoginPage() {
         </p>
       }
     >
+      <GoogleSignIn />
       <AuthForm mode="login" />
     </AuthShell>
   );

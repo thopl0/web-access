@@ -1,13 +1,114 @@
 import { Worker } from "bullmq";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { eq } from "drizzle-orm";
-import { RENDER_QUEUE, type RenderJob } from "@web-access/shared";
-import { runAnalysis } from "@web-access/analyzers";
+import {
+  CRAWL_QUEUE,
+  MONITOR_QUEUE,
+  RENDER_QUEUE,
+  pathAllowed,
+  type CrawlJob,
+  type Finding,
+  type MonitorJob,
+  type RenderJob,
+} from "@web-access/shared";
+import { runAnalysis, enrichFindings, type FindingExplanation } from "@web-access/analyzers";
 import { db, schema } from "../lib/server/db";
 import { env } from "../lib/server/env";
-import { getConnection } from "../lib/server/queue";
+import { getConnection, getMonitorQueue } from "../lib/server/queue";
+import { enqueueCrawl, enqueueScan } from "../lib/server/scan";
+import { notifyCriticalScan, sendWeeklyDigests } from "../lib/server/notify";
 
 const connection = getConnection();
+
+// Cropped visual evidence: screenshot just the offending element so the dashboard can SHOW it.
+const MAX_EVIDENCE = 40; // cap per scan — worst issues first
+const MAX_EVIDENCE_PX = 1_500_000; // ~1500×1000; skip near-full-page elements (keep crops "cropped")
+const SEVERITY_RANK: Record<string, number> = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+
+type EvidenceRow = {
+  findingId: number;
+  pngBase64: string;
+  width: number;
+  height: number;
+  // Document-relative top-left (CSS px), so the dashboard can place this element on the full-page
+  // screenshot. Null when we couldn't resolve a layout box for it.
+  pageX: number | null;
+  pageY: number | null;
+};
+
+// Full-page screenshot per scan, bounded so a giant page can't bloat the DB or the dashboard.
+// Captured as JPEG: a rendered page compresses to a fraction of the PNG size, so even long landing
+// pages (routinely 8–12k px tall) fit comfortably. Only truly endless/infinite-scroll pages skip.
+const MAX_SHOT_HEIGHT = 20000; // px — skip endlessly-tall pages (infinite scroll, etc.)
+const MAX_SHOT_BYTES = 3_000_000; // drop the canvas (not the crops) if it's still heavier than this
+const SHOT_QUALITY = 80; // JPEG quality — legible for text while keeping size small
+
+type ScanShot = { pngBase64: string; width: number; height: number };
+
+/** One full-page screenshot for the scan — the canvas element highlights overlay onto. Stored as
+ *  JPEG (column name is historical). Best-effort: returns null for over-tall/over-heavy pages so the
+ *  detail view degrades to per-element crops. */
+async function captureScanShot(page: Page): Promise<ScanShot | null> {
+  try {
+    const dims = await page.evaluate(() => {
+      const d = document.documentElement;
+      return { width: d.scrollWidth, height: d.scrollHeight };
+    });
+    if (!dims.width || !dims.height || dims.height > MAX_SHOT_HEIGHT) return null;
+    const buf = await page.screenshot({ fullPage: true, type: "jpeg", quality: SHOT_QUALITY, timeout: 8000 });
+    if (buf.byteLength > MAX_SHOT_BYTES) return null;
+    return { pngBase64: buf.toString("base64"), width: Math.round(dims.width), height: Math.round(dims.height) };
+  } catch {
+    return null;
+  }
+}
+
+/** Screenshot each finding's element (worst-first, capped). Best-effort: skip anything we can't grab.
+ *  Also records the element's document-relative position so the dashboard can highlight it on the
+ *  full-page shot. */
+async function captureEvidence(
+  page: Page,
+  findings: Finding[],
+  ids: { id: number }[],
+): Promise<EvidenceRow[]> {
+  const order = findings
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ra = SEVERITY_RANK[findings[a]!.impact ?? "minor"] ?? 9;
+      const rb = SEVERITY_RANK[findings[b]!.impact ?? "minor"] ?? 9;
+      return ra - rb;
+    })
+    .slice(0, MAX_EVIDENCE);
+
+  const rows: EvidenceRow[] = [];
+  for (const i of order) {
+    const id = ids[i]?.id;
+    const selector = findings[i]?.selector;
+    if (id == null || !selector) continue;
+    try {
+      const loc = page.locator(selector).first();
+      // Document-relative box (includes scroll), so it lines up with the fullPage screenshot.
+      const box = await loc.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + window.scrollX, y: r.top + window.scrollY, w: r.width, h: r.height };
+      });
+      if (!box || box.w < 1 || box.h < 1) continue;
+      if (box.w * box.h > MAX_EVIDENCE_PX) continue; // too big to be a useful crop
+      const buf = await loc.screenshot({ timeout: 2500 });
+      rows.push({
+        findingId: id,
+        pngBase64: buf.toString("base64"),
+        width: Math.round(box.w),
+        height: Math.round(box.h),
+        pageX: Math.round(box.x),
+        pageY: Math.round(box.y),
+      });
+    } catch {
+      // element missing/detached/offscreen/un-screenshotable — evidence is optional, move on
+    }
+  }
+  return rows;
+}
 
 // One shared browser process; a fresh context per job for isolation.
 let browser: Browser | null = null;
@@ -19,7 +120,7 @@ async function getBrowser(): Promise<Browser> {
 const worker = new Worker<RenderJob>(
   RENDER_QUEUE,
   async (job) => {
-    const { scanId, url, renderedHtml } = job.data;
+    const { scanId, siteId, url, renderedHtml } = job.data;
     await db.update(schema.scans).set({ status: "running" }).where(eq(schema.scans.id, scanId));
 
     const context = await (await getBrowser()).newContext();
@@ -36,21 +137,231 @@ const worker = new Worker<RenderJob>(
       }
 
       const findings = await runAnalysis(page);
+
+      // Insert findings first so we can key cropped evidence to their ids. Postgres returns the
+      // rows in insertion order, so `ids[i]` lines up with `findings[i]`.
+      let ids: { id: number }[] = [];
       if (findings.length > 0) {
-        await db.insert(schema.findings).values(findings.map((f) => ({ scanId, ...f })));
+        ids = await db
+          .insert(schema.findings)
+          .values(findings.map((f) => ({ scanId, ...f })))
+          .returning({ id: schema.findings.id });
       }
+
+      const evidenceRows = await captureEvidence(page, findings, ids);
+      if (evidenceRows.length > 0) {
+        await db.insert(schema.evidence).values(evidenceRows).onConflictDoNothing();
+      }
+
+      // One full-page screenshot for the scan — the canvas the dashboard overlays element
+      // highlights onto. Only worth keeping if we actually have boxes to highlight.
+      if (evidenceRows.some((r) => r.pageX != null)) {
+        const shot = await captureScanShot(page);
+        if (shot) {
+          await db
+            .insert(schema.scanShots)
+            .values({ scanId, ...shot })
+            .onConflictDoNothing();
+        }
+      }
+
+      // Tier-3 AI: rewrite the deterministic findings' generic messages into element-specific,
+      // plain-language guidance (text-only; no-ops when GLM is unconfigured). Best-effort — a
+      // failure here must not fail the scan, so explanations stay optional.
+      let explained = 0;
+      try {
+        const explanations = await enrichFindings(findings);
+        const rows = explanations
+          .map((e, i) => (e && ids[i] ? { findingId: ids[i]!.id, ...e } : null))
+          .filter((r): r is { findingId: number } & FindingExplanation => r !== null);
+        if (rows.length > 0) {
+          await db.insert(schema.findingExplanations).values(rows).onConflictDoNothing();
+          explained = rows.length;
+        }
+      } catch (err) {
+        console.error(`scan ${scanId} enrichment failed:`, err);
+      }
+
       await db
         .update(schema.scans)
         .set({ status: "complete", completedAt: new Date() })
         .where(eq(schema.scans.id, scanId));
 
-      return { findings: findings.length };
+      // Alert the owner when a scan surfaces critical issues — deduped to once/day/site via a
+      // Redis cooldown key so re-scans don't spam.
+      const criticalCount = findings.filter((f) => f.impact === "critical").length;
+      if (criticalCount > 0) {
+        const acquired = await connection.set(
+          `notify:critical:${siteId}`,
+          "1",
+          "EX",
+          86400,
+          "NX",
+        );
+        if (acquired) void notifyCriticalScan(siteId, criticalCount).catch(() => {});
+      }
+
+      return { findings: findings.length, evidence: evidenceRows.length, explained };
     } finally {
       await context.close();
     }
   },
   { connection, concurrency: env.CONCURRENCY },
 );
+
+// ---------------------------------------------------------------------------
+// Crawl worker: render a site's origin, discover same-origin pages, fan out into render scans.
+// Triggered on first verification (and on demand). Light work — one page render for link
+// discovery; the heavy per-page analysis happens in the render worker above.
+// ---------------------------------------------------------------------------
+
+/** FNV-1a 32-bit hash → hex. Mirrors the embed's hashing so crawl scans share a fingerprint shape. */
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/** Normalize a discovered href to a same-origin `origin+pathname` (matching the embed's pageUrl),
+ *  or null if it's off-origin / not http(s). Query + hash are dropped so instances collapse. */
+function normalizeUrl(raw: string, base: string): string | null {
+  try {
+    const u = new URL(raw, base);
+    if (!/^https?:$/.test(u.protocol)) return null;
+    if (u.origin !== new URL(base).origin) return null;
+    return u.origin + u.pathname;
+  } catch {
+    return null;
+  }
+}
+
+const crawlWorker = new Worker<CrawlJob>(
+  CRAWL_QUEUE,
+  async (job) => {
+    const { siteId, origin } = job.data;
+
+    const rows = await db
+      .select({ status: schema.sites.status, scanConfig: schema.sites.scanConfig })
+      .from(schema.sites)
+      .where(eq(schema.sites.id, siteId))
+      .limit(1);
+    const siteRow = rows[0];
+    if (!siteRow || siteRow.status === "paused") return { skipped: true };
+    const config = siteRow.scanConfig;
+
+    const context = await (await getBrowser()).newContext();
+    await context.addInitScript(() => {
+      (window as unknown as Record<string, unknown>).__WEB_ACCESS_RENDERER = true;
+    });
+    const page = await context.newPage();
+
+    let discovered: string[] = [];
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded", timeout: env.NAV_TIMEOUT_MS });
+      const hrefs = await page.$$eval("a[href]", (els) =>
+        els.map((e) => (e as HTMLAnchorElement).href),
+      );
+      const set = new Set<string>();
+      const root = normalizeUrl(origin, origin);
+      if (root) set.add(root); // always include the landing page itself
+      for (const h of hrefs) {
+        const n = normalizeUrl(h, origin);
+        if (n) set.add(n);
+      }
+      // Apply the site's page-access control, then cap how many pages we monitor.
+      discovered = [...set].filter((u) => pathAllowed(u, config)).slice(0, config.pageCap);
+    } finally {
+      await context.close();
+    }
+
+    // releaseId keyed by the crawl run so a scheduled re-crawl re-scans, but one run dedups per-url.
+    const runId = job.id ?? "crawl";
+    let enqueued = 0;
+    for (const url of discovered) {
+      const res = await enqueueScan({
+        siteId,
+        url,
+        releaseId: `crawl:${runId}`,
+        templateFingerprint: fnv1a(url),
+      });
+      if (!res.deduped) enqueued += 1;
+    }
+    return { discovered: discovered.length, enqueued };
+  },
+  { connection, concurrency: 1 },
+);
+
+crawlWorker.on("completed", (job, result) =>
+  console.log(`crawl ${job.data.siteId} complete:`, result),
+);
+crawlWorker.on("failed", (job, err) =>
+  console.error(`crawl ${job?.data.siteId} failed:`, err?.message),
+);
+
+// ---------------------------------------------------------------------------
+// Monitor worker: a periodic tick that re-crawls every verified, non-paused, auto-crawl site so
+// monitoring is continuous (catches regressions between releases), not only release-triggered.
+// The recurring schedule is registered below via a BullMQ job scheduler.
+// ---------------------------------------------------------------------------
+const monitorWorker = new Worker<MonitorJob>(
+  MONITOR_QUEUE,
+  async (job) => {
+    // The monitor queue carries two recurring jobs, distinguished by name.
+    if (job.name === "digest") {
+      const sent = await sendWeeklyDigests();
+      return { digest: sent };
+    }
+
+    const rows = await db
+      .select({
+        id: schema.sites.id,
+        origin: schema.sites.origin,
+        scanConfig: schema.sites.scanConfig,
+      })
+      .from(schema.sites)
+      .where(eq(schema.sites.status, "verified"));
+
+    let queued = 0;
+    for (const s of rows) {
+      if (s.origin && s.scanConfig.autoCrawl) {
+        await enqueueCrawl(s.id, s.origin, "scheduled");
+        queued += 1;
+      }
+    }
+    return { eligible: rows.length, queued };
+  },
+  { connection, concurrency: 1 },
+);
+
+monitorWorker.on("completed", (_job, result) => console.log("monitor tick:", result));
+monitorWorker.on("failed", (_job, err) => console.error("monitor tick failed:", err?.message));
+
+// Register (idempotently) the recurring monitor tick. MONITOR_INTERVAL_MS=0 disables it.
+if (env.MONITOR_INTERVAL_MS > 0) {
+  void getMonitorQueue()
+    .upsertJobScheduler(
+      "site-monitor",
+      { every: env.MONITOR_INTERVAL_MS },
+      { name: "tick", opts: { removeOnComplete: 50, removeOnFail: 50 } },
+    )
+    .then(() => console.log(`monitor scheduled every ${env.MONITOR_INTERVAL_MS}ms`))
+    .catch((err) => console.error("failed to schedule monitor:", err));
+}
+
+// Recurring weekly digest email. DIGEST_INTERVAL_MS=0 disables it (and it no-ops without email).
+if (env.DIGEST_INTERVAL_MS > 0) {
+  void getMonitorQueue()
+    .upsertJobScheduler(
+      "weekly-digest",
+      { every: env.DIGEST_INTERVAL_MS },
+      { name: "digest", opts: { removeOnComplete: 20, removeOnFail: 20 } },
+    )
+    .then(() => console.log(`digest scheduled every ${env.DIGEST_INTERVAL_MS}ms`))
+    .catch((err) => console.error("failed to schedule digest:", err));
+}
 
 worker.on("ready", () => console.log("worker ready — waiting for render jobs"));
 worker.on("completed", (job, result) =>
@@ -68,7 +379,7 @@ worker.on("failed", async (job, err) => {
 });
 
 async function shutdown(): Promise<void> {
-  await worker.close();
+  await Promise.all([worker.close(), crawlWorker.close(), monitorWorker.close()]);
   if (browser) await browser.close();
   connection.disconnect();
   process.exit(0);

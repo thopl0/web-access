@@ -59,6 +59,39 @@
   --shadow-brut-lg: 8px 8px 0 0 var(--color-line);
 
   --radius-none: 0px;
+
+  --color-panel-line: var(--panel-line);
+  --color-panel-line-strong: var(--panel-line-strong);
+}
+
+/* ------------------------------------------------------------------ *
+ * App / dashboard surfaces — a calmer homage to the brutalist blocks.
+ * The marketing site keeps its hard 3px borders + offset shadows; the
+ * signed-in app uses real (thin) borders, a small radius, and soft
+ * elevation so dense data reads clearly. The display font, uppercase
+ * micro-labels, accent palette, and monospace chips carry the family
+ * resemblance. Defined outside @theme so they can flip per color-scheme.
+ * ------------------------------------------------------------------ */
+:root {
+  --panel-line: color-mix(in srgb, var(--line) 14%, transparent);
+  --panel-line-strong: color-mix(in srgb, var(--line) 28%, transparent);
+  --panel-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent),
+    0 12px 28px -20px color-mix(in srgb, var(--ink) 45%, transparent);
+  --panel-shadow-lg: 0 2px 4px color-mix(in srgb, var(--ink) 8%, transparent),
+    0 18px 40px -22px color-mix(in srgb, var(--ink) 55%, transparent);
+  --inset-line: color-mix(in srgb, var(--line) 9%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --panel-line: color-mix(in srgb, var(--line) 16%, transparent);
+    --panel-line-strong: color-mix(in srgb, var(--line) 34%, transparent);
+    --panel-shadow: 0 1px 2px rgba(0, 0, 0, 0.4),
+      0 14px 30px -20px rgba(0, 0, 0, 0.7);
+    --panel-shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.45),
+      0 20px 44px -22px rgba(0, 0, 0, 0.75);
+    --inset-line: color-mix(in srgb, var(--line) 12%, transparent);
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -145,6 +178,36 @@ h4 {
   }
   .brut-press.shadow-ink:active {
     box-shadow: 0 0 0 0 var(--ink);
+  }
+
+  /* Dashboard panel: the soft homage surface. */
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--panel-line);
+    border-radius: 14px;
+    box-shadow: var(--panel-shadow);
+  }
+  /* Whole-panel link/affordance: a gentle lift in place of the hard press. */
+  .panel-link {
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      border-color 0.16s ease;
+  }
+  .panel-link:hover {
+    transform: translateY(-2px);
+    border-color: var(--panel-line-strong);
+    box-shadow: var(--panel-shadow-lg);
+  }
+  .panel-link:active {
+    transform: translateY(0);
+    box-shadow: var(--panel-shadow);
+  }
+  /* Inset block (code, nested rows) — flat, hairline-bordered, slight tint. */
+  .inset {
+    background: color-mix(in srgb, var(--color-fg) 3%, var(--color-surface));
+    border: 1px solid var(--inset-line);
+    border-radius: 10px;
   }
 }
 
