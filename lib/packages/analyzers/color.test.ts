@@ -80,4 +80,18 @@ describe("backgroundContrast", () => {
     expect(res.sampled).toBe(0);
     expect(res.ratio).toBe(Infinity);
   });
+
+  it("ignores a thin anti-alias halo so readable text isn't a false positive", () => {
+    // Dark navy text on a cream card: cream dominates; the intermediate "blend" pixels along glyph
+    // edges are a thin minority and must NOT drag the measured contrast down (the old bug).
+    const NAVY: RGB = { r: 30, g: 45, b: 80 };
+    const CREAM: RGB = { r: 250, g: 245, b: 225 };
+    const BLEND: RGB = { r: 140, g: 145, b: 152 }; // ~halfway → mid luminance edge pixel
+    const pixels: RGB[] = [];
+    for (let i = 0; i < 120; i++) pixels.push(CREAM); // dominant background
+    for (let i = 0; i < 8; i++) pixels.push(BLEND); // ~6% halo — below the fraction threshold
+    for (let i = 0; i < 30; i++) pixels.push(NAVY); // glyph cores (excluded as near-fg)
+    const res = backgroundContrast(buf(pixels), NAVY);
+    expect(res.ratio).toBeGreaterThan(4.5); // cream-vs-navy is high; halo doesn't fool it
+  });
 });

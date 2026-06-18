@@ -44,37 +44,66 @@ function colorDistance(a: RGB, b: RGB): number {
 }
 
 export interface BackgroundContrastResult {
-  /** Robust near-worst-case contrast of background pixels vs the text color. */
+  /** Worst contrast among the SUBSTANTIAL background colour regions vs the text colour.
+   *  `Infinity` when no region was large enough to judge confidently. */
   ratio: number;
   /** How many pixels were treated as background (after excluding glyph pixels). */
   sampled: number;
 }
 
 /**
- * Given the RGBA pixels of a text element's rendered box and its foreground color, estimate the
- * worst-case contrast the text has against its (image/gradient) background.
+ * Given the RGBA pixels of a text element's rendered box and its foreground colour, estimate the
+ * worst contrast the text has against its (image/gradient) background.
  *
- * We can't cleanly separate glyph pixels from background in a screenshot that already has text, so
- * we (a) drop pixels close to the foreground color (the glyphs + heavy anti-alias) and (b) report a
- * low percentile rather than the absolute minimum, to shrug off stray anti-aliased edge pixels.
+ * Per-pixel sampling is unreliable: anti-aliasing produces a halo of intermediate-luminance pixels
+ * along every glyph edge, and multi-coloured text contributes off-colour pixels — both look like
+ * "low-contrast background" and create false positives on perfectly readable text. Instead we
+ * cluster the (non-glyph) pixels into a coarse colour histogram and only consider buckets that each
+ * cover a meaningful FRACTION of the area. Real background regions form big clusters; anti-alias
+ * halos and stray glyph colours spread thinly across many buckets and are ignored. We then report
+ * the worst contrast among the substantial regions. If nothing is substantial enough (text fills the
+ * box, only edges remain) we return Infinity — we'd rather say nothing than cry wolf.
+ *
  * This is the deterministic Tier-2 pixel-sampling method (no AI) from the plan.
  */
 export function backgroundContrast(
   rgba: Uint8Array | Uint8ClampedArray,
   fg: RGB,
-  opts: { excludeNearFg?: number; percentile?: number } = {},
+  opts: { excludeNearFg?: number; minFraction?: number } = {},
 ): BackgroundContrastResult {
   const exclude = opts.excludeNearFg ?? 48;
-  const percentile = opts.percentile ?? 5;
-  const ratios: number[] = [];
+  const minFraction = opts.minFraction ?? 0.12;
+
+  // 5-bit-per-channel histogram of background pixels, accumulating true averages per bucket.
+  const buckets = new Map<number, { count: number; r: number; g: number; b: number }>();
+  let total = 0;
   for (let i = 0; i + 3 < rgba.length; i += 4) {
     if (rgba[i + 3]! < 200) continue; // skip mostly-transparent pixels
-    const px: RGB = { r: rgba[i]!, g: rgba[i + 1]!, b: rgba[i + 2]! };
-    if (colorDistance(px, fg) < exclude) continue; // glyph / heavy anti-alias
-    ratios.push(contrastRatio(px, fg));
+    const r = rgba[i]!;
+    const g = rgba[i + 1]!;
+    const b = rgba[i + 2]!;
+    if (colorDistance({ r, g, b }, fg) < exclude) continue; // glyph / heavy anti-alias
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    const e = buckets.get(key);
+    if (e) {
+      e.count++;
+      e.r += r;
+      e.g += g;
+      e.b += b;
+    } else {
+      buckets.set(key, { count: 1, r, g, b });
+    }
+    total++;
   }
-  if (ratios.length === 0) return { ratio: Infinity, sampled: 0 };
-  ratios.sort((x, y) => x - y);
-  const idx = Math.min(ratios.length - 1, Math.floor((percentile / 100) * ratios.length));
-  return { ratio: ratios[idx]!, sampled: ratios.length };
+  if (total === 0) return { ratio: Infinity, sampled: 0 };
+
+  const minCount = total * minFraction;
+  let worst = Infinity;
+  for (const e of buckets.values()) {
+    if (e.count < minCount) continue; // too small to be a real background region
+    const avg: RGB = { r: e.r / e.count, g: e.g / e.count, b: e.b / e.count };
+    const ratio = contrastRatio(avg, fg);
+    if (ratio < worst) worst = ratio;
+  }
+  return { ratio: worst, sampled: total };
 }
