@@ -134,7 +134,8 @@ export type ElementExplanation = {
  *  Drawn as a highlight box over the page's `shot`. */
 export type ElementBox = { x: number; y: number; w: number; h: number };
 
-/** One affected element under a rule. `screenshot` is a base64 PNG crop (data-URL body), if captured. */
+/** One affected element under a rule. `screenshot`, when present, is the URL of the cropped element
+ *  image — served (access-controlled) by `/api/evidence/[findingId]`, with `?token=` on shared views. */
 export type IssueElement = {
   selector: string;
   htmlSnippet: string;
@@ -151,8 +152,9 @@ export type IssueElement = {
 };
 
 /** A downscaled full-page screenshot for a page — the canvas element highlights overlay onto.
- *  `width`/`height` are the document's CSS-px dimensions so boxes map on as fractions. */
-export type PageShot = { png: string; width: number; height: number };
+ *  `src` is the image URL, served (access-controlled) by `/api/shot/[scanId]` (with `?token=` on
+ *  shared views). `width`/`height` are the document's CSS-px dimensions so boxes map on as fractions. */
+export type PageShot = { src: string; width: number; height: number };
 
 /** Findings for a single rule on a page, with every element it affects. */
 export type IssueGroup = {
@@ -292,11 +294,14 @@ function pickShown(scans: ScanRow[]): ScanRow {
 
 export async function getSitePages(
   siteId: string,
-  opts: { evidence?: boolean } = {},
+  opts: { evidence?: boolean; shareToken?: string } = {},
 ): Promise<SitePages> {
-  // The list view only needs counts, so it opts out of the heavy base64 evidence
-  // join. The detail view keeps it (default) to show element screenshots.
+  // The list view only needs counts, so it opts out of the evidence join. The detail view keeps it
+  // (default) to emit element screenshot URLs.
   const withEvidence = opts.evidence ?? true;
+  // Image URLs are access-controlled; on a public share view we carry the site's share token so the
+  // image routes authorize the anonymous viewer. Authed (owner) views pass no token.
+  const tokenQuery = opts.shareToken ? `?token=${encodeURIComponent(opts.shareToken)}` : "";
   // Newest first so the first match per url is the latest, and the first
   // "complete" we hit is the latest completed.
   const scans = await db
@@ -348,7 +353,8 @@ export async function getSitePages(
       ? await db.select().from(schema.scanShots).where(inArray(schema.scanShots.scanId, shownIds))
       : [];
   const shotByScan = new Map<string, PageShot>();
-  for (const s of shotRows) shotByScan.set(s.scanId, { png: s.pngBase64, width: s.width, height: s.height });
+  for (const s of shotRows)
+    shotByScan.set(s.scanId, { src: `/api/shot/${s.scanId}${tokenQuery}`, width: s.width, height: s.height });
 
   // AI explanations for those findings (separate table, opt-in with evidence — only the detail
   // view needs them; the list/summary view passes evidence:false and skips this join too).
@@ -433,7 +439,7 @@ export async function getSitePages(
             htmlSnippet: r.htmlSnippet,
             ...(ev
               ? {
-                  screenshot: ev.pngBase64,
+                  screenshot: `/api/evidence/${r.id}${tokenQuery}`,
                   ...(ev.width != null ? { width: ev.width } : {}),
                   ...(ev.height != null ? { height: ev.height } : {}),
                   ...(ev.pageX != null && ev.pageY != null && ev.width != null && ev.height != null

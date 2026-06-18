@@ -43,6 +43,9 @@ Thumbs.db
 *.swp
 *.pem
 
+# Local object storage (dev screenshot/evidence bytes; prod uses R2)
+.data/
+
 # Misc caches
 .cache/
 .tmp/

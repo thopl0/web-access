@@ -36,6 +36,25 @@ export const env = {
   NAV_TIMEOUT_MS: Number(process.env.NAV_TIMEOUT_MS ?? 30000),
   /** How many render jobs the worker processes concurrently. */
   CONCURRENCY: Number(process.env.WORKER_CONCURRENCY ?? 2),
+  /** Object storage for screenshots + evidence crops (see lib/server/storage.ts). Driver is
+   *  auto-selected when STORAGE_DRIVER is unset: R2 if its creds are present, else local disk.
+   *  - `local` (dev): bytes under STORAGE_DIR; no cloud bucket needed.
+   *  - `r2` (prod): Cloudflare R2 via the S3 API. */
+  STORAGE_DRIVER: process.env.STORAGE_DRIVER as "local" | "r2" | undefined,
+  /** Local driver root (relative to repo cwd). */
+  STORAGE_DIR: process.env.STORAGE_DIR ?? ".data/storage",
+  /** Cloudflare R2 (S3-compatible). Required when the driver resolves to `r2`. R2_API_ENDPOINT is the
+   *  bucket's S3 endpoint (Cloudflare gives `https://<account>.r2.cloudflarestorage.com/<bucket>`);
+   *  when unset it's built from R2_ACCOUNT_ID + R2_BUCKET_NAME. R2_ACCESS_KEY is the secret. */
+  R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+  R2_ACCESS_KEY: process.env.R2_ACCESS_KEY,
+  R2_BUCKET_NAME: process.env.R2_BUCKET_NAME,
+  R2_API_ENDPOINT: process.env.R2_API_ENDPOINT,
+  /** Public bucket URL (r2.dev / custom domain). Intentionally UNUSED: images are streamed through
+   *  the access-controlled routes instead, since evidence keys are sequential and a public bucket
+   *  would let anyone enumerate other users' screenshots. Kept here only to document the contract. */
+  R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
   /** Interval between scheduled monitor ticks (re-crawl all eligible sites), ms. Default 24h.
    *  Set to 0 to disable scheduled monitoring entirely. */
   MONITOR_INTERVAL_MS: Number(process.env.MONITOR_INTERVAL_MS ?? 24 * 60 * 60 * 1000),

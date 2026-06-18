@@ -99,7 +99,7 @@ export default async function SiteReportsPage({
       path: pathOf(p.url),
       siteId,
       counts: p.counts,
-      ...(p.shot ? { shot: { png: p.shot.png, width: p.shot.width, height: p.shot.height } } : {}),
+      ...(p.shot ? { shot: { src: p.shot.src, width: p.shot.width, height: p.shot.height } } : {}),
       markers,
       issues,
       grouped: p.grouped,

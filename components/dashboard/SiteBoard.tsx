@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ExternalLink, ImageOff, Maximize2, ScanLine } from "lucide-react";
 
-import { cn, imageDataUrl } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { Severity, SeverityCounts } from "@/lib/severity";
 import { grade, healthScore } from "@/lib/score";
 
@@ -35,7 +35,7 @@ export type BoardPage = {
   path: string;
   siteId: string;
   counts: SeverityCounts;
-  shot?: { png: string; width: number; height: number };
+  shot?: { src: string; width: number; height: number };
   markers: BoardMarker[];
   issues: { ruleId: string; title: string; impact: Severity | null; count: number }[];
   grouped: boolean;
@@ -117,9 +117,9 @@ function ShotWithMarkers({
   // tall image inside the box and break marker alignment — hence neither here.)
   const overlay = (
     <div className="relative w-full bg-white">
-      {/* eslint-disable-next-line @next/next/no-img-element -- inline base64 data URL */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- access-controlled image route, not optimizable */}
       <img
-        src={imageDataUrl(shot.png)}
+        src={shot.src}
         alt={`Screenshot of ${page.path}`}
         className="block h-auto w-full"
       />

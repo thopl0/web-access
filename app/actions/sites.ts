@@ -14,6 +14,7 @@ import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
 import { enqueueCrawl, enqueueScan } from "@/lib/server/scan";
 import { notifySiteVerified } from "@/lib/server/notify";
+import { purgeSiteBlobs } from "@/lib/server/storage";
 
 export type SiteFormState =
   | {
@@ -295,6 +296,10 @@ export async function deleteSite(
   if (String(formData.get("confirm") ?? "").trim() !== site.name) {
     return { error: "Type the site name exactly to confirm." };
   }
+
+  // Remove the site's screenshots/evidence from object storage first (DB cascades don't reach it).
+  // Best-effort: a failure here must not block the delete, so purgeSiteBlobs swallows its own errors.
+  await purgeSiteBlobs(siteId);
 
   // scans aren't FK-linked to sites, so delete them first (cascades findings → evidence /
   // explanations); deleting the site then cascades its issueOverrides.

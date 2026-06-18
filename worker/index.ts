@@ -14,6 +14,7 @@ import {
 import { runAnalysis, enrichFindings, type FindingExplanation } from "@web-access/analyzers";
 import { db, schema } from "../lib/server/db";
 import { env } from "../lib/server/env";
+import { storage, shotKey, evidenceKey } from "../lib/server/storage";
 import { getConnection, getMonitorQueue } from "../lib/server/queue";
 import { enqueueCrawl, enqueueScan } from "../lib/server/scan";
 import { notifyCriticalScan, sendWeeklyDigests } from "../lib/server/notify";
@@ -25,9 +26,10 @@ const MAX_EVIDENCE = 40; // cap per scan — worst issues first
 const MAX_EVIDENCE_PX = 1_500_000; // ~1500×1000; skip near-full-page elements (keep crops "cropped")
 const SEVERITY_RANK: Record<string, number> = { critical: 0, serious: 1, moderate: 2, minor: 3 };
 
-type EvidenceRow = {
+type EvidenceCrop = {
   findingId: number;
-  pngBase64: string;
+  // Raw PNG bytes — uploaded to object storage, then dropped in favour of an `objectKey` DB row.
+  buf: Buffer;
   width: number;
   height: number;
   // Document-relative top-left (CSS px), so the dashboard can place this element on the full-page
@@ -43,10 +45,10 @@ const MAX_SHOT_HEIGHT = 20000; // px — skip endlessly-tall pages (infinite scr
 const MAX_SHOT_BYTES = 3_000_000; // drop the canvas (not the crops) if it's still heavier than this
 const SHOT_QUALITY = 80; // JPEG quality — legible for text while keeping size small
 
-type ScanShot = { pngBase64: string; width: number; height: number };
+type ScanShot = { buf: Buffer; width: number; height: number };
 
-/** One full-page screenshot for the scan — the canvas element highlights overlay onto. Stored as
- *  JPEG (column name is historical). Best-effort: returns null for over-tall/over-heavy pages so the
+/** One full-page screenshot for the scan — the canvas element highlights overlay onto. Captured as
+ *  JPEG; bytes go to object storage. Best-effort: returns null for over-tall/over-heavy pages so the
  *  detail view degrades to per-element crops. */
 async function captureScanShot(page: Page): Promise<ScanShot | null> {
   try {
@@ -57,7 +59,7 @@ async function captureScanShot(page: Page): Promise<ScanShot | null> {
     if (!dims.width || !dims.height || dims.height > MAX_SHOT_HEIGHT) return null;
     const buf = await page.screenshot({ fullPage: true, type: "jpeg", quality: SHOT_QUALITY, timeout: 8000 });
     if (buf.byteLength > MAX_SHOT_BYTES) return null;
-    return { pngBase64: buf.toString("base64"), width: Math.round(dims.width), height: Math.round(dims.height) };
+    return { buf, width: Math.round(dims.width), height: Math.round(dims.height) };
   } catch {
     return null;
   }
@@ -70,7 +72,7 @@ async function captureEvidence(
   page: Page,
   findings: Finding[],
   ids: { id: number }[],
-): Promise<EvidenceRow[]> {
+): Promise<EvidenceCrop[]> {
   const order = findings
     .map((_, i) => i)
     .sort((a, b) => {
@@ -80,7 +82,7 @@ async function captureEvidence(
     })
     .slice(0, MAX_EVIDENCE);
 
-  const rows: EvidenceRow[] = [];
+  const rows: EvidenceCrop[] = [];
   for (const i of order) {
     const id = ids[i]?.id;
     const selector = findings[i]?.selector;
@@ -97,7 +99,7 @@ async function captureEvidence(
       const buf = await loc.screenshot({ timeout: 2500 });
       rows.push({
         findingId: id,
-        pngBase64: buf.toString("base64"),
+        buf,
         width: Math.round(box.w),
         height: Math.round(box.h),
         pageX: Math.round(box.x),
@@ -148,7 +150,26 @@ const worker = new Worker<RenderJob>(
           .returning({ id: schema.findings.id });
       }
 
-      const evidenceRows = await captureEvidence(page, findings, ids);
+      // Upload each crop's bytes to object storage, then persist only the storage key. A failed
+      // upload drops that crop (evidence is optional) rather than failing the scan.
+      const crops = await captureEvidence(page, findings, ids);
+      const evidenceRows: (typeof schema.evidence.$inferInsert)[] = [];
+      for (const c of crops) {
+        const key = evidenceKey(c.findingId);
+        try {
+          await storage.put(key, c.buf, "image/png");
+          evidenceRows.push({
+            findingId: c.findingId,
+            objectKey: key,
+            width: c.width,
+            height: c.height,
+            pageX: c.pageX,
+            pageY: c.pageY,
+          });
+        } catch (err) {
+          console.error(`scan ${scanId} evidence upload failed (finding ${c.findingId}):`, err);
+        }
+      }
       if (evidenceRows.length > 0) {
         await db.insert(schema.evidence).values(evidenceRows).onConflictDoNothing();
       }
@@ -158,10 +179,16 @@ const worker = new Worker<RenderJob>(
       if (evidenceRows.some((r) => r.pageX != null)) {
         const shot = await captureScanShot(page);
         if (shot) {
-          await db
-            .insert(schema.scanShots)
-            .values({ scanId, ...shot })
-            .onConflictDoNothing();
+          const key = shotKey(scanId);
+          try {
+            await storage.put(key, shot.buf, "image/jpeg");
+            await db
+              .insert(schema.scanShots)
+              .values({ scanId, objectKey: key, width: shot.width, height: shot.height })
+              .onConflictDoNothing();
+          } catch (err) {
+            console.error(`scan ${scanId} full-page shot upload failed:`, err);
+          }
         }
       }
 

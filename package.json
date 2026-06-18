@@ -29,6 +29,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
     "@axe-core/playwright": "^4.10.1",
+    "aws4fetch": "^1.0.20",
     "axe-core": "^4.10.2",
     "bullmq": "^5.34.5",
     "drizzle-orm": "^0.38.3",

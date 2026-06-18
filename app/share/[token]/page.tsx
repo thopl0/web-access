@@ -32,7 +32,9 @@ export default async function SharedReportPage({
   const site = rows[0];
   if (!site) notFound();
 
-  const { pages, counts } = await getSitePages(site.id);
+  // Pass the share token so screenshot URLs carry it — the image routes authorize anonymous
+  // viewers of a shared report by token (no session required).
+  const { pages, counts } = await getSitePages(site.id, { shareToken: token });
   const rules = rollupByRule(pages);
   const hasPages = pages.length > 0;
   const conformance = summarizeConformance(rules, { evaluated: hasPages });

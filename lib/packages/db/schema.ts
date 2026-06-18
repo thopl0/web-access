@@ -105,15 +105,16 @@ export const findings = pgTable(
  * dashboard can SHOW where the problem is instead of asking laypeople to decode a CSS selector.
  *
  * Aligns with the "results-only (cropped/masked evidence)" retention rule: we keep the small crop,
- * never the full page render. PNG bytes are base64-encoded into a text column so they can be inlined
- * as a data URL on the server-rendered (and access-controlled) dashboard — no separate image route.
- * Kept in its own table so the heavy column never loads with normal finding queries.
+ * never the full page render. The PNG bytes live in object storage (R2 in prod, local disk in dev —
+ * see lib/server/storage.ts); only the storage key is kept here. The crop is streamed back through
+ * the access-controlled `/api/evidence/[findingId]` route.
  */
 export const evidence = pgTable("evidence", {
   findingId: integer("finding_id")
     .primaryKey()
     .references(() => findings.id, { onDelete: "cascade" }),
-  pngBase64: text("png_base64").notNull(),
+  // Object-storage key for the cropped PNG (e.g. `evidence/<findingId>.png`).
+  objectKey: text("object_key").notNull(),
   width: integer("width"),
   height: integer("height"),
   // Document-relative top-left of the element box, in CSS px. Paired with the per-scan full-page
@@ -125,10 +126,11 @@ export const evidence = pgTable("evidence", {
 
 /**
  * One downscaled full-page screenshot per scan — the canvas the dashboard overlays element
- * highlights onto (using each finding's evidence box). Stored in its own table, like cropped
- * evidence, so the heavy base64 column never loads with normal scan/finding queries and is only
- * fetched by the issue-detail view. Best-effort: absent when the page was too tall/large to keep
- * bounded, so the annotated view degrades gracefully to per-element crops.
+ * highlights onto (using each finding's evidence box). The JPEG bytes live in object storage (R2 in
+ * prod, local disk in dev — see lib/server/storage.ts); only the storage key is kept here, so the
+ * row stays light. Streamed back through the access-controlled `/api/shot/[scanId]` route.
+ * Best-effort: absent when the page was too tall/large to keep bounded, so the annotated view
+ * degrades gracefully to per-element crops.
  *
  * `width`/`height` are the document's CSS-pixel dimensions, so element boxes (also CSS px) map onto
  * the image as simple fractions — the overlay positions in %, staying resolution-independent.
@@ -137,7 +139,8 @@ export const scanShots = pgTable("scan_shots", {
   scanId: text("scan_id")
     .primaryKey()
     .references(() => scans.id, { onDelete: "cascade" }),
-  pngBase64: text("png_base64").notNull(),
+  // Object-storage key for the full-page JPEG (e.g. `shots/<scanId>.jpg`).
+  objectKey: text("object_key").notNull(),
   width: integer("width").notNull(),
   height: integer("height").notNull(),
 });

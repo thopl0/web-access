@@ -8,6 +8,7 @@ import { signOut } from "@/auth";
 import { db, schema } from "@/lib/server/db";
 import { verifySession } from "@/lib/server/dal";
 import { hashPassword, verifyPassword } from "@/lib/server/password";
+import { purgeSiteBlobs } from "@/lib/server/storage";
 
 /** Shared shape for the account forms. Field keys line up with the form inputs;
  *  `_form` holds errors not tied to a single field. `ok` flips the success UI. */
@@ -141,6 +142,8 @@ export async function deleteAccount(
     .where(eq(schema.sites.ownerId, userId));
   const siteIds = siteRows.map((s) => s.id);
   if (siteIds.length > 0) {
+    // Best-effort cleanup of each site's screenshots/evidence in object storage before the rows go.
+    await Promise.all(siteIds.map((id) => purgeSiteBlobs(id)));
     await db.delete(schema.scans).where(inArray(schema.scans.siteId, siteIds));
   }
   await db.delete(schema.users).where(eq(schema.users.id, userId));

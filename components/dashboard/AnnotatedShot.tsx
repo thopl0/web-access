@@ -1,7 +1,7 @@
 import { ImageOff } from "lucide-react";
 
 import type { ElementBox, PageShot } from "@/lib/server/report";
-import { cn, imageDataUrl } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 /**
  * "See it" evidence for an offending element. Three graceful tiers, in order of
@@ -29,7 +29,7 @@ export function AnnotatedShot({
   shot?: PageShot | undefined;
   /** Offending element's box in the shot's CSS-px coordinate space. */
   box?: ElementBox | undefined;
-  /** Element crop (base64 PNG body), used when there's no shot/box. */
+  /** Element crop image URL, used when there's no shot/box. */
   crop?: string | undefined;
   cropWidth?: number | undefined;
   cropHeight?: number | undefined;
@@ -46,8 +46,8 @@ export function AnnotatedShot({
             The clipper caps height by SCROLLING (never object-contain/letterbox, which would drift). */}
         <div className="max-h-[32rem] overflow-y-auto rounded-lg border border-[var(--inset-line)] bg-white">
           <div className="relative w-full">
-            {/* eslint-disable-next-line @next/next/no-img-element -- inline base64 data URL; next/image can't optimize it */}
-            <img src={imageDataUrl(shot.png)} alt={label} className="block h-auto w-full" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- access-controlled image route, not optimizable */}
+            <img src={shot.src} alt={label} className="block h-auto w-full" />
             <span
               aria-hidden
               className="pointer-events-none absolute rounded-sm ring-2 ring-pink ring-offset-0 shadow-[0_0_0_2px_color-mix(in_srgb,var(--color-pink)_35%,transparent)]"
@@ -72,9 +72,9 @@ export function AnnotatedShot({
   if (crop) {
     return (
       <figure className={cn("m-0", className)}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- inline base64 data URL; next/image can't optimize it */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- access-controlled image route, not optimizable */}
         <img
-          src={`data:image/png;base64,${crop}`}
+          src={crop}
           alt={label}
           width={cropWidth}
           height={cropHeight}

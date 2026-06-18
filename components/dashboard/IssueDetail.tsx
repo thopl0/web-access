@@ -105,9 +105,9 @@ export function IssueElements({
       {elements.map((el, i) => (
         <li key={`${keyPrefix}-${i}`} className="rounded-lg border border-[var(--inset-line)] bg-surface p-3">
           {el.screenshot ? (
-            // eslint-disable-next-line @next/next/no-img-element -- inline base64 data URL; next/image can't optimize it
+            // eslint-disable-next-line @next/next/no-img-element -- access-controlled image route, not optimizable
             <img
-              src={`data:image/png;base64,${el.screenshot}`}
+              src={el.screenshot}
               alt={`Screenshot of the affected element: ${el.selector}`}
               width={el.width}
               height={el.height}
