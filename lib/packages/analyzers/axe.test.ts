@@ -51,6 +51,19 @@ describe("mapAxeViolations", () => {
     expect(findings[1]?.selector).toBe("#shadow-host img");
   });
 
+  it("marks iframe frame boundaries instead of forging a same-document selector", () => {
+    const inFrame = [
+      {
+        id: "image-alt",
+        impact: "critical",
+        help: "h",
+        tags: ["wcag111"],
+        nodes: [{ html: "<img>", target: ["#main-frame", "img.logo"] }],
+      },
+    ] as unknown as AxeResult[];
+    expect(mapAxeViolations(inFrame)[0]?.selector).toBe("#main-frame >> img.logo");
+  });
+
   it("falls back to the violation impact when a node has none", () => {
     const findings = mapAxeViolations(violations);
     expect(findings[1]?.impact).toBe("critical");

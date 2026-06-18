@@ -14,6 +14,8 @@ const el = (over: Partial<GeomEl>): GeomEl => ({
   y: 0,
   w: 100,
   h: 20,
+  container: 0, // same flex/grid container by default, so reading-order pairs are comparable
+  inFlow: true,
   ...over,
 });
 
@@ -49,6 +51,31 @@ describe("detectReadingOrderInversions", () => {
     // B is above A but in a different column → legitimate multi-column layout, not an inversion
     const a = el({ domIndex: 0, x: 0, y: 100, w: 100 });
     const b = el({ domIndex: 1, x: 200, y: 0, w: 100 });
+    expect(detectReadingOrderInversions([a, b])).toHaveLength(0);
+  });
+
+  it("does not flag out-of-flow (absolute/fixed/sticky) elements", () => {
+    const a = el({ domIndex: 0, selector: "A", x: 0, y: 100, w: 100, h: 20 });
+    const b = el({ domIndex: 1, selector: "B", x: 0, y: 0, w: 100, h: 20, inFlow: false });
+    expect(detectReadingOrderInversions([a, b])).toHaveLength(0);
+  });
+
+  it("does not compare elements in different flex/grid containers", () => {
+    const a = el({ domIndex: 0, selector: "A", x: 0, y: 100, w: 100, h: 20, container: 1 });
+    const b = el({ domIndex: 1, selector: "B", x: 0, y: 0, w: 100, h: 20, container: 2 });
+    expect(detectReadingOrderInversions([a, b])).toHaveLength(0);
+  });
+
+  it("does not flag elements with no reordering container (container = -1)", () => {
+    const a = el({ domIndex: 0, selector: "A", x: 0, y: 100, w: 100, h: 20, container: -1 });
+    const b = el({ domIndex: 1, selector: "B", x: 0, y: 0, w: 100, h: 20, container: -1 });
+    expect(detectReadingOrderInversions([a, b])).toHaveLength(0);
+  });
+
+  it("does not flag when horizontal overlap is below half the narrower width", () => {
+    // B sits above A but only overlaps 30 of A's 100px width → different column, not an inversion
+    const a = el({ domIndex: 0, selector: "A", x: 0, y: 100, w: 100, h: 20 });
+    const b = el({ domIndex: 1, selector: "B", x: 70, y: 0, w: 100, h: 20 });
     expect(detectReadingOrderInversions([a, b])).toHaveLength(0);
   });
 

@@ -24,6 +24,8 @@ export interface ImageCandidate {
   alt: string;
   /** Author declared this image decorative (`alt=""`, `role="presentation"`/`"none"`, `aria-hidden`). */
   declaredDecorative: boolean;
+  /** `aria-hidden="true"` — removed from the accessibility tree, so its alt is never announced. */
+  ariaHidden: boolean;
   /** The image is the (only) content of a link — alt then has to convey the link's destination. */
   inLink: boolean;
   /** Visible text of the enclosing link, if any (helps judge whether alt is redundant/missing). */
@@ -94,6 +96,7 @@ export async function collectImages(page: Page): Promise<ImageCandidate[]> {
             role === "presentation" ||
             role === "none" ||
             img.getAttribute("aria-hidden") === "true",
+          ariaHidden: img.getAttribute("aria-hidden") === "true",
           inLink: link !== null,
           linkText: clip(link?.textContent, 120),
           caption: clip(figure?.querySelector("figcaption")?.textContent, 200),
@@ -120,8 +123,10 @@ interface Verdict {
 const SYSTEM_PROMPT =
   "You are an accessibility expert judging the QUALITY of an image's alt text for a blind " +
   "screen-reader user, using ONLY the text given (you cannot see the image). Judge:\n" +
-  "- filename-as-alt: the alt text is essentially the file name or a code (e.g. \"DSC_0421.JPG\", " +
-  '"hero-banner-2"), conveying nothing.\n' +
+  "- filename-as-alt: the alt text is a camera/system filename or opaque code that conveys nothing " +
+  '(e.g. "DSC_0421.JPG", "IMG_2024", "a1b2c3.png", "screenshot-2023-11-02"). Do NOT flag alt that ' +
+  "merely resembles a slug but reads as a real description (e.g. \"model-s\", \"iphone-15-pro\", a " +
+  "brand or product name) — that is fine.\n" +
   "- uninformative-alt: the alt is a vague placeholder (\"image\", \"photo\", \"graphic\", " +
   '"untitled") that does not describe what the image shows or does.\n' +
   '- redundant-phrasing: the alt opens with "image of" / "photo of" / "picture of" / "graphic of" ' +
@@ -134,13 +139,16 @@ const ISSUE_META: Record<
   Exclude<Verdict["issue"], "ok">,
   { ruleId: string; impact: Finding["impact"] }
 > = {
-  "filename-as-alt": { ruleId: "alt-text-filename", impact: "serious" },
+  "filename-as-alt": { ruleId: "alt-text-filename", impact: "moderate" },
   "uninformative-alt": { ruleId: "alt-text-uninformative", impact: "serious" },
   "redundant-phrasing": { ruleId: "alt-text-redundant", impact: "minor" },
 };
 
 /** Ask GLM to judge one image's alt-text quality. Returns a Finding for a real problem, else null. */
 async function judgeImage(img: ImageCandidate): Promise<Finding | null> {
+  // aria-hidden images are removed from the accessibility tree — their alt is never announced, so
+  // there is no alt-text quality problem to report (any link-name issue is axe's job, not ours).
+  if (img.ariaHidden) return null;
   // Nothing to judge: a genuinely decorative image with no alt and no link/caption context.
   if (img.declaredDecorative && !img.inLink && !img.caption) return null;
 

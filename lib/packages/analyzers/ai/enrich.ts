@@ -1,8 +1,10 @@
 /**
  * Tier-3 AI enrichment (text-only): turn the deterministic analyzers' generic, per-rule developer
  * messages ("Elements must meet minimum color contrast ratio thresholds") into specific,
- * plain-language guidance about the ACTUAL offending element ("The light-grey 'Subscribe' button
- * text is hard to read on the white background"), for non-technical site owners.
+ * plain-language guidance about the ACTUAL offending element ("The 'Subscribe' button's text is too
+ * low-contrast against its background to read comfortably"), for non-technical site owners. It only
+ * has the element's HTML + the generic message to work from, so it must NOT invent specifics it
+ * wasn't given (exact colors, ratios, sizes) — see the prompt below.
  *
  * One batched GLM call per scan (text-only — works on the coding-plan endpoint, see `glm.ts`).
  * Findings are deduped by (rule + element HTML) so identical spots cost one slot, and each item
@@ -32,6 +34,10 @@ const SYSTEM_PROMPT =
   "to real visitors. Use the HTML to be concrete (name the element by its visible text, label, or " +
   "purpose). No jargon, no CSS selectors, no rule ids.\n" +
   "- fix: one short sentence with a concrete fix.\n" +
+  "CRITICAL: only state facts present in the given HTML or message. Do NOT invent specifics you " +
+  "weren't given — no color names, contrast ratios, pixel sizes, or counts. If the offending detail " +
+  "isn't in the HTML (e.g. the actual colors of a contrast issue), describe the problem and fix in " +
+  "general terms (\"this text is too low-contrast against its background\") instead of guessing.\n" +
   "Keep each field under ~240 characters. Return ONLY JSON of the form " +
   '{"items":[{"id":0,"what":"...","fix":"..."}]} — exactly one entry per input id.';
 

@@ -14,10 +14,20 @@ function truncate(s: string, max = SNIPPET_MAX): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
-/** axe target entries can be nested arrays (shadow DOM); flatten to a single selector string. */
+/**
+ * Render an axe `target` into a readable location string. axe encodes two kinds of nesting:
+ *   - the TOP-LEVEL array is a FRAME path — one entry per `<iframe>` level, the last being the
+ *     element inside the deepest frame. Length 1 means the element is in the main document.
+ *   - any entry may itself be a `string[]`, a shadow-DOM path within that frame/document.
+ * Flattening both with a plain space (the old behaviour) produced an INVALID same-document selector
+ * for in-iframe findings (e.g. `#frame button` — which doesn't exist in the top document). We join
+ * shadow steps with a space but frame levels with ` >> ` so the boundary is explicit and honest.
+ */
 function selectorToString(target: unknown): string {
-  if (Array.isArray(target)) return target.map(selectorToString).join(" ");
-  return String(target);
+  if (!Array.isArray(target)) return target == null ? "" : String(target);
+  return target
+    .map((level) => (Array.isArray(level) ? level.map((s) => String(s)).join(" ") : String(level)))
+    .join(" >> ");
 }
 
 /** Convert axe tags like "wcag111" / "wcag1412" into SC numbers like "1.1.1" / "1.4.12". */
