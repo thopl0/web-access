@@ -11,19 +11,23 @@ import {
   type MonitorJob,
   type RenderJob,
 } from "@web-access/shared";
-import { runAnalysis, enrichFindings, type FindingExplanation } from "@web-access/analyzers";
+import { runAnalysis, enrichFindings, suggestFixes, type FindingExplanation } from "@web-access/analyzers";
 import { db, schema } from "../lib/server/db";
 import { env } from "../lib/server/env";
 import { storage, shotKey, evidenceKey } from "../lib/server/storage";
 import { getConnection, getMonitorQueue } from "../lib/server/queue";
 import { enqueueCrawl, enqueueScan } from "../lib/server/scan";
 import { notifyCriticalScan, sendWeeklyDigests } from "../lib/server/notify";
+import { ownerEntitlements } from "../lib/server/entitlements";
 
 const connection = getConnection();
 
 // Cropped visual evidence: screenshot just the offending element so the dashboard can SHOW it.
 const MAX_EVIDENCE = 40; // cap per scan — worst issues first
 const MAX_EVIDENCE_PX = 1_500_000; // ~1500×1000; skip near-full-page elements (keep crops "cropped")
+// Concrete before→after fixes: cap per scan (mirrors enrichment's cap) so a giant scan can't blow the
+// AI budget/latency. Worst-first, so the highest-impact findings are the ones that get a paste-ready fix.
+const MAX_FIXES = 25;
 const SEVERITY_RANK: Record<string, number> = { critical: 0, serious: 1, moderate: 2, minor: 3 };
 
 type EvidenceCrop = {
@@ -138,7 +142,11 @@ const worker = new Worker<RenderJob>(
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: env.NAV_TIMEOUT_MS });
       }
 
-      const findings = await runAnalysis(page);
+      // The owner's plan gates the AI tiers (judge / enrichment / AI fixes); the deterministic
+      // tiers + fixes always run. Unowned system sites (demo) resolve to full entitlements.
+      const ent = await ownerEntitlements(siteId);
+
+      const findings = await runAnalysis(page, { ai: ent.aiJudge });
 
       // Insert findings first so we can key cropped evidence to their ids. Postgres returns the
       // rows in insertion order, so `ids[i]` lines up with `findings[i]`.
@@ -197,7 +205,7 @@ const worker = new Worker<RenderJob>(
       // failure here must not fail the scan, so explanations stay optional.
       let explained = 0;
       try {
-        const explanations = await enrichFindings(findings);
+        const explanations = ent.aiJudge ? await enrichFindings(findings) : [];
         const rows = explanations
           .map((e, i) => (e && ids[i] ? { findingId: ids[i]!.id, ...e } : null))
           .filter((r): r is { findingId: number } & FindingExplanation => r !== null);
@@ -207,6 +215,48 @@ const worker = new Worker<RenderJob>(
         }
       } catch (err) {
         console.error(`scan ${scanId} enrichment failed:`, err);
+      }
+
+      // Concrete fixes: turn each finding into paste-ready before→after markup (the product's core
+      // differentiator). Deterministic transforms run for free; judgment rules (alt-text content,
+      // ambiguous link text) fall back to the text-only AI in ONE batched call (no-op when GLM is
+      // unconfigured — Phase A still works via deterministic fixes). Worst-first + capped like
+      // enrichment, and best-effort: a failure here must not fail the scan, so fixes stay optional.
+      let fixed = 0;
+      try {
+        // Compute over the worst findings first, capped — so the budget goes to the highest-impact
+        // spots. `fixIdx[]` maps each computed result back to its row id (ids[i] lines up with findings[i]).
+        const fixIdx = findings
+          .map((_, i) => i)
+          .sort((a, b) => {
+            const ra = SEVERITY_RANK[findings[a]!.impact ?? "minor"] ?? 9;
+            const rb = SEVERITY_RANK[findings[b]!.impact ?? "minor"] ?? 9;
+            return ra - rb;
+          })
+          .slice(0, MAX_FIXES);
+        const suggestions = await suggestFixes(fixIdx.map((i) => findings[i]!), { ai: ent.aiJudge });
+        const rows = suggestions
+          .map((s, j) => {
+            const i = fixIdx[j]!;
+            return s && ids[i]
+              ? {
+                  findingId: ids[i]!.id,
+                  kind: s.kind,
+                  before: s.before,
+                  after: s.after,
+                  needsReview: s.needsReview,
+                  note: s.note ?? null,
+                  attributePatch: s.attributePatch ?? null,
+                }
+              : null;
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null);
+        if (rows.length > 0) {
+          await db.insert(schema.fixSuggestions).values(rows).onConflictDoNothing();
+          fixed = rows.length;
+        }
+      } catch (err) {
+        console.error(`scan ${scanId} fix suggestion failed:`, err);
       }
 
       await db
@@ -228,7 +278,7 @@ const worker = new Worker<RenderJob>(
         if (acquired) void notifyCriticalScan(siteId, criticalCount).catch(() => {});
       }
 
-      return { findings: findings.length, evidence: evidenceRows.length, explained };
+      return { findings: findings.length, evidence: evidenceRows.length, explained, fixed };
     } finally {
       await context.close();
     }

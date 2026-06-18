@@ -1,4 +1,7 @@
+import { AlertTriangle } from "lucide-react";
+
 import { Badge } from "@/components/ui/Badge";
+import { CopyButton } from "@/components/dashboard/CopyButton";
 import { explainRule } from "@/lib/explain";
 import type { IssueElement } from "@/lib/server/report";
 
@@ -126,6 +129,38 @@ export function IssueElements({
                 <span className="font-bold">Fix: </span>
                 {el.explanation.fix}
               </p>
+            </div>
+          ) : null}
+          {el.fix ? (
+            <div className="mb-3 rounded-lg border border-[var(--inset-line)] p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-blue">Suggested fix</p>
+                {el.fix.kind === "ai" || el.fix.needsReview ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-pink/15 px-2 py-0.5 text-xs font-bold text-pink">
+                    <AlertTriangle className="size-3 shrink-0" aria-hidden strokeWidth={2.5} />
+                    Needs review
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">Current</p>
+              <pre className="inset mt-1 overflow-x-auto p-2 text-sm text-fg">
+                <code>{el.fix.before}</code>
+              </pre>
+              <p className="mt-2 text-xs font-bold uppercase tracking-wide text-fg-soft">Should be</p>
+              <pre className="inset mt-1 overflow-x-auto p-2 text-sm text-fg">
+                <code>{el.fix.after}</code>
+              </pre>
+              {(el.fix.kind === "ai" || el.fix.needsReview) && el.fix.note ? (
+                <p className="mt-2 text-xs text-fg-soft">{el.fix.note}</p>
+              ) : null}
+              <div className="mt-3">
+                <CopyButton
+                  text={el.fix.after}
+                  label="Copy fixed code"
+                  copiedLabel="Code copied"
+                  className="text-xs"
+                />
+              </div>
             </div>
           ) : null}
           <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">Code location</p>

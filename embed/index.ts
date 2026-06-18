@@ -150,6 +150,65 @@
     }
   }
 
+  // --- Phase C: opt-in, non-visual runtime remediation -----------------------------------------
+  // With the owner's explicit per-fix approval, fetch the site's approved attribute patches and apply
+  // them to the live DOM as a TEMPORARY, non-visual patch (the source fix stays primary). We ONLY ever
+  // setAttribute for attrs in this allowlist — re-checked client-side so a tampered/stale manifest can
+  // never set a visual or behavioural attribute. Everything is wrapped so it can never throw into the
+  // host page; a missing/empty/failed manifest is a silent no-op.
+  const SAFE_ATTRS: Record<string, true> = {
+    alt: true,
+    "aria-label": true,
+    "aria-labelledby": true,
+    "aria-describedby": true,
+    lang: true,
+    role: true,
+    title: true,
+    "aria-hidden": true,
+  };
+
+  interface ManifestEntry {
+    selector: string;
+    patches: { attr: string; value: string }[];
+  }
+
+  function applyRemediations(): void {
+    try {
+      void fetch(`${cfg!.ingest}/v1/remediation/${encodeURIComponent(cfg!.siteId)}`, {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { entries?: ManifestEntry[] } | null) => {
+          const entries = data && Array.isArray(data.entries) ? data.entries : [];
+          for (const entry of entries) {
+            if (!entry || typeof entry.selector !== "string" || !Array.isArray(entry.patches)) continue;
+            let nodes: NodeListOf<Element>;
+            try {
+              nodes = document.querySelectorAll(entry.selector);
+            } catch {
+              continue; // bad selector — skip, never throw
+            }
+            nodes.forEach((node) => {
+              for (const p of entry.patches) {
+                if (!p || typeof p.attr !== "string" || typeof p.value !== "string") continue;
+                if (!SAFE_ATTRS[p.attr]) continue; // re-check the safe allowlist client-side
+                try {
+                  node.setAttribute(p.attr, p.value);
+                } catch {
+                  /* never throw into host */
+                }
+              }
+            });
+          }
+        })
+        .catch(() => {});
+    } catch {
+      /* never throw into host */
+    }
+  }
+
   /** Run work in idle time so we never compete with the host's rendering. */
   function idle(fn: () => void): void {
     const ric = (w.requestIdleCallback as ((cb: () => void) => void) | undefined);
@@ -170,6 +229,7 @@
       history[name] = function (this: History, ...args: unknown[]) {
         const result = (orig as (...a: unknown[]) => unknown).apply(this, args);
         schedule();
+        applyRemediations();
         return result;
       } as History[typeof name];
     };
@@ -181,10 +241,21 @@
     /* if history patching fails, the initial scan below still runs */
   }
 
-  // Initial scan once the document is interactive.
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", schedule, { once: true });
-  } else {
-    schedule();
+  // Apply approved runtime remediations as soon as the DOM is available (independent of the scan
+  // scheduling, and only ever the owner-approved, safe attribute patches). No-op when the site has
+  // none / hasn't opted in (the endpoint returns an empty manifest).
+  function onReady(fn: () => void): void {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn, { once: true });
+    } else {
+      fn();
+    }
   }
+
+  // Initial scan once the document is interactive.
+  onReady(schedule);
+  // Re-apply on SPA route changes too, so client-rendered views also get patched.
+  onReady(applyRemediations);
+  window.addEventListener("popstate", applyRemediations);
+  window.addEventListener("hashchange", applyRemediations);
 })();

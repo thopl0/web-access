@@ -53,10 +53,13 @@ export function aiConfigured(): boolean {
   return glmConfig() !== null;
 }
 
-// NOTE: image input is supported by `glmAsk` (GlmBlock `image`) for a future vision-capable
-// provider, but GLM's coding-plan Anthropic endpoint silently DROPS images (the model then
-// hallucinates — verify with `pnpm tsx scripts/ai-vision-check.ts`). The Tier-3 judge is therefore
-// text-only today; don't send image blocks through this endpoint expecting them to be seen.
+// VISION (verified 2026-06-18): GLM *does* have vision models (glm-4.5v / glm-4.6v), but NOT through
+// this Anthropic-compatible endpoint — it serializes the image block to text and the model echoes it
+// instead of seeing pixels (tested both content orderings). Vision works only via GLM's native
+// OpenAI-compatible endpoint (`{host}/api/paas/v4/chat/completions`, `image_url` data-URI), which
+// our request format passes — but the coding-plan key returns `1113 余额不足` (no PAYG balance) there.
+// So the Tier-3 judge is text-only UNTIL the Zhipu account has vision balance; then add a separate
+// /paas/v4 vision client (don't expect image blocks through this Anthropic client to be seen).
 
 let cached: Anthropic | null = null;
 function getClient(cfg: GlmConfig): Anthropic {

@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { ScanConfig, type SiteStatus } from "@web-access/shared";
+import { ScanConfig, StatementConfig, type SiteStatus } from "@web-access/shared";
 import { db, schema } from "@/lib/server/db";
 import { verifySession } from "@/lib/server/dal";
 import { checkSnippetInstalled, installCheckMessage } from "@/lib/server/verify";
@@ -15,6 +15,14 @@ import { embedSnippet } from "@/lib/embed";
 import { enqueueCrawl, enqueueScan } from "@/lib/server/scan";
 import { notifySiteVerified } from "@/lib/server/notify";
 import { purgeSiteBlobs } from "@/lib/server/storage";
+import {
+  canAddSite,
+  countUserSites,
+  getUserEntitlements,
+  getUserPlan,
+  ownerScanUsage,
+  withinScanQuota,
+} from "@/lib/server/entitlements";
 
 export type SiteFormState =
   | {
@@ -57,6 +65,20 @@ export async function createSite(
   });
   if (!parsed.success) {
     return { errors: parsed.error.flatten().fieldErrors };
+  }
+
+  // Enforce the plan's site limit before doing any work. Surfaced as a `_form` error so the wizard
+  // shows it inline like any other failure (keeps the SiteFormState contract).
+  const [plan, siteCount] = await Promise.all([
+    getUserPlan(userId),
+    countUserSites(userId),
+  ]);
+  if (!canAddSite(plan, siteCount)) {
+    return {
+      errors: {
+        _form: ["You've reached your plan's site limit — upgrade to add more."],
+      },
+    };
   }
 
   const { name, origin: siteUrl } = parsed.data;
@@ -138,6 +160,17 @@ export async function recrawlSite(siteId: string): Promise<{ ok: boolean; messag
   if (!site) return { ok: false, message: "Site not found." };
   if (!site.origin) return { ok: false, message: "Add a site URL first." };
 
+  // Monthly scan-quota gate. A re-crawl fans out into many scans, so block it once the owner is over
+  // budget rather than let the worker enqueue past the cap. (We gate the request seam, not enqueueScan
+  // itself, because the worker calls enqueueScan internally on every re-crawl — see lib/server/scan.ts.)
+  const usage = await ownerScanUsage(siteId);
+  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+    return {
+      ok: false,
+      message: "You've used this month's scan quota — upgrade for more scans.",
+    };
+  }
+
   await enqueueCrawl(siteId, site.origin, "manual");
   revalidatePath(`/dashboard/${siteId}`);
   revalidatePath(`/dashboard/${siteId}/pages`);
@@ -152,6 +185,15 @@ export async function rescanPage(
   const { userId } = await verifySession();
   const site = await ownedSite(siteId, userId);
   if (!site) return { ok: false, message: "Site not found." };
+
+  // Monthly scan-quota gate (see recrawlSite for why this lives at the request seam, not in scan.ts).
+  const usage = await ownerScanUsage(siteId);
+  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+    return {
+      ok: false,
+      message: "You've used this month's scan quota — upgrade for more scans.",
+    };
+  }
 
   await enqueueScan({
     siteId,
@@ -279,6 +321,65 @@ export async function setSiteSharing(
 
   revalidatePath(`/dashboard/${siteId}/settings`);
   return { ok: true, token };
+}
+
+/** Publish or unpublish the site's hosted accessibility statement. Returns the token (null = off). */
+export async function setStatementPublished(
+  siteId: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; token: string | null }> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { ok: false, token: null };
+
+  // Publishing a hosted statement is a paid-plan (artifacts) feature; always allow unpublishing.
+  if (enabled && !(await getUserEntitlements(userId)).artifacts) {
+    return { ok: false, token: null };
+  }
+
+  // Keep an existing token when re-enabling so live links don't break; clear it when disabling.
+  const token = enabled ? (site.statementToken ?? randomUUID().replace(/-/g, "")) : null;
+  await db.update(schema.sites).set({ statementToken: token }).where(eq(schema.sites.id, siteId));
+
+  revalidatePath(`/dashboard/${siteId}/settings`);
+  return { ok: true, token };
+}
+
+export type StatementConfigState = { ok?: boolean; error?: string } | undefined;
+
+/** Save the owner-supplied parts of the accessibility statement (entity name, contact, target). */
+export async function updateStatementConfig(
+  _prev: StatementConfigState,
+  formData: FormData,
+): Promise<StatementConfigState> {
+  const { userId } = await verifySession();
+  const siteId = String(formData.get("siteId") ?? "");
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { error: "Site not found." };
+
+  // Empty strings → undefined so optional fields clear cleanly and don't fail email/url validation.
+  const clean = (v: FormDataEntryValue | null) => {
+    const s = String(v ?? "").trim();
+    return s.length ? s : undefined;
+  };
+
+  const parsed = StatementConfig.safeParse({
+    entityName: clean(formData.get("entityName")),
+    contactEmail: clean(formData.get("contactEmail")),
+    contactUrl: clean(formData.get("contactUrl")),
+    target: formData.get("target") ?? "2.1-AA",
+  });
+  if (!parsed.success) {
+    return { error: "Check the contact email and URL — they don't look valid." };
+  }
+
+  await db
+    .update(schema.sites)
+    .set({ statementConfig: parsed.data })
+    .where(eq(schema.sites.id, siteId));
+
+  revalidatePath(`/dashboard/${siteId}/settings`);
+  return { ok: true };
 }
 
 export type DeleteSiteState = { error?: string } | undefined;

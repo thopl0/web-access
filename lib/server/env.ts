@@ -64,4 +64,15 @@ export const env = {
   EMAIL_FROM: process.env.EMAIL_FROM,
   /** Interval between weekly digest emails, ms. Default 7d. Set to 0 to disable digests. */
   DIGEST_INTERVAL_MS: Number(process.env.DIGEST_INTERVAL_MS ?? 7 * 24 * 60 * 60 * 1000),
+  /** Stripe billing. ALL optional — when STRIPE_SECRET_KEY is unset the billing layer no-ops the same
+   *  way email (RESEND_API_KEY) and the AI judge (GLM_API_KEY) do: getStripe() returns null, checkout/
+   *  portal degrade to a "billing not configured" state, and the webhook 503s. Nothing crashes.
+   *  - STRIPE_SECRET_KEY      — server-side API key (`sk_...`). The single switch that enables billing.
+   *  - STRIPE_WEBHOOK_SECRET  — signing secret (`whsec_...`) the webhook verifies the raw body against.
+   *  - STRIPE_PRICE_PRO / STRIPE_PRICE_BUSINESS — recurring price ids checkout charges; also the map
+   *    used (in reverse) by the webhook to resolve a Stripe price back to one of our plans. */
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+  STRIPE_PRICE_PRO: process.env.STRIPE_PRICE_PRO,
+  STRIPE_PRICE_BUSINESS: process.env.STRIPE_PRICE_BUSINESS,
 };

@@ -4,6 +4,7 @@ import { IngestRequest, pathAllowed } from "@web-access/shared";
 import { db, schema } from "@/lib/server/db";
 import { enqueueCrawl, enqueueScan } from "@/lib/server/scan";
 import { notifySiteVerified } from "@/lib/server/notify";
+import { ownerScanUsage, withinScanQuota } from "@/lib/server/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,6 +103,16 @@ export async function POST(req: Request) {
   // Respect the site's page-access control (allow/deny path globs).
   if (!pathAllowed(url, siteRow.scanConfig)) {
     return json({ skipped: "path_excluded" }, 200, origin);
+  }
+
+  // Monthly scan-quota gate. Return 200 (so the embed treats it as accepted and doesn't retry) but
+  // DON'T enqueue once the owner is over budget. Unowned sites (seeded demo-site) have no quota.
+  const usage = await ownerScanUsage(siteId);
+  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+    console.log(
+      `[ingest] scan quota reached for site ${siteId} (owner ${usage.ownerId}, plan ${usage.plan}) — skipping`,
+    );
+    return json({ skipped: "quota_exceeded" }, 200, origin);
   }
 
   const { scanId, deduped } = await enqueueScan({

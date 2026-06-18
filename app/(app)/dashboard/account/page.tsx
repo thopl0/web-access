@@ -3,9 +3,18 @@ import { eq } from "drizzle-orm";
 import { LogOut } from "lucide-react";
 
 import { ProfileForm, PasswordForm, DeleteAccountForm } from "@/components/dashboard/AccountForms";
+import { BillingActions } from "@/components/dashboard/BillingActions";
 import { BackLink, PageHeader, Panel } from "@/components/dashboard/ui";
 import { getUser } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
+import {
+  entitlementsFor,
+  isPaidPlan,
+  normalizePlan,
+  countUserSites,
+  countUserScansThisMonth,
+} from "@/lib/server/entitlements";
+import { billingConfigured, priceIdForPlan } from "@/lib/server/billing";
 import { logout } from "@/app/actions/auth";
 
 export const metadata: Metadata = { title: "Account" };
@@ -14,14 +23,34 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage() {
   const user = await getUser();
 
-  // Whether the account has a password decides if the Password form requires the
-  // current one (true) or lets an OAuth-only user set their first (false).
+  // One users-row read covers both the password gate and the plan/billing summary.
+  // - hasPassword decides if the Password form requires the current one (true) or lets an
+  //   OAuth-only user set their first (false).
+  // - plan/planStatus/planRenewsAt drive the "Plan & billing" section below.
   const rows = await db
-    .select({ passwordHash: schema.users.passwordHash })
+    .select({
+      passwordHash: schema.users.passwordHash,
+      plan: schema.users.plan,
+      planStatus: schema.users.planStatus,
+      planRenewsAt: schema.users.planRenewsAt,
+    })
     .from(schema.users)
     .where(eq(schema.users.id, user!.id))
     .limit(1);
   const hasPassword = Boolean(rows[0]?.passwordHash);
+
+  const plan = normalizePlan(rows[0]?.plan);
+  const ent = entitlementsFor(plan);
+  const planStatus = rows[0]?.planStatus ?? null;
+  const planRenewsAt = rows[0]?.planRenewsAt ?? null;
+
+  const [siteCount, scansThisMonth] = await Promise.all([
+    countUserSites(user!.id),
+    countUserScansThisMonth(user!.id),
+  ]);
+
+  const billingOn = billingConfigured();
+  const paid = isPaidPlan(plan);
 
   const titleId = "account-title";
 
@@ -68,6 +97,32 @@ export default async function AccountPage() {
               Log out
             </button>
           </form>
+        </Panel>
+
+        <Panel as="section">
+          <h2 className="font-display text-lg font-bold text-fg">Plan &amp; billing</h2>
+          <dl className="mt-4 flex flex-col gap-1">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <dt className="font-display font-bold text-fg">{ent.label}</dt>
+              <dd className="text-fg-soft">{planStatus ?? "—"}</dd>
+            </div>
+            {planRenewsAt ? (
+              <dd className="text-sm text-fg-soft">
+                Renews {planRenewsAt.toLocaleDateString()}
+              </dd>
+            ) : null}
+          </dl>
+          <p className="mt-3 text-sm text-fg-soft">
+            {siteCount} / {ent.maxSites} sites · {scansThisMonth} / {ent.scansPerMonth} scans this
+            month
+          </p>
+          <BillingActions
+            currentPlan={plan}
+            isPaid={paid}
+            billingConfigured={billingOn}
+            proAvailable={priceIdForPlan("pro") != null}
+            businessAvailable={priceIdForPlan("business") != null}
+          />
         </Panel>
 
         <section className="rounded-[14px] border-[3px] border-pink/40 p-5 sm:p-6">

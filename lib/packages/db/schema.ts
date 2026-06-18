@@ -3,13 +3,21 @@ import {
   text,
   integer,
   serial,
+  boolean,
   jsonb,
   timestamp,
   uniqueIndex,
   index,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import { DEFAULT_SCAN_CONFIG, type ScanConfig, type SiteStatus } from "@web-access/shared";
+import {
+  DEFAULT_SCAN_CONFIG,
+  DEFAULT_STATEMENT_CONFIG,
+  type AttributePatch,
+  type ScanConfig,
+  type SiteStatus,
+  type StatementConfig,
+} from "@web-access/shared";
 
 /** A registered account. Email is stored already lowercased (callers normalize). */
 export const users = pgTable(
@@ -21,6 +29,17 @@ export const users = pgTable(
     // Nullable: OAuth (e.g. Google) accounts have no password. A null hash means
     // the account can only sign in via its OAuth provider, not email/password.
     passwordHash: text("password_hash"),
+    // Billing / entitlements. `plan` is the authoritative tier ("free" | "pro" | "business") that
+    // drives every limit + feature gate (see lib/entitlements.ts); it defaults to "free" so accounts
+    // work with no billing at all. The Stripe fields are populated by the billing webhook and are all
+    // nullable — they stay null when Stripe is unconfigured or the user has never paid, and nothing
+    // reads them on the free path. `planStatus` mirrors the Stripe subscription status
+    // (active/past_due/canceled/…); `planRenewsAt` is the current period end.
+    plan: text("plan").notNull().default("free"),
+    planStatus: text("plan_status"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    planRenewsAt: timestamp("plan_renews_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -49,11 +68,26 @@ export const sites = pgTable(
     scanConfig: jsonb("scan_config").$type<ScanConfig>().notNull().default(DEFAULT_SCAN_CONFIG),
     // Unguessable token for a public, read-only report link. Null = sharing off.
     shareToken: text("share_token"),
+    // Unguessable token for the publicly-hosted accessibility statement. Null = not published.
+    // Mirrors shareToken: the statement page reads live scan data, so the token only gates access.
+    statementToken: text("statement_token"),
+    // Owner-supplied statement content (entity name, contact route, target standard). The
+    // conformance facts are computed live; this is just the parts only the owner can supply.
+    statementConfig: jsonb("statement_config")
+      .$type<StatementConfig>()
+      .notNull()
+      .default(DEFAULT_STATEMENT_CONFIG),
+    // Master opt-in for Phase C runtime remediation: when true, the embed fetches the site's
+    // approved attribute patches and applies them to the live DOM (non-visual only — alt/aria/lang/
+    // role/title). Default false: nothing is ever served or applied until the owner turns this on
+    // AND approves individual fixes. The source fix stays primary; this is a temporary patch.
+    runtimeRemediation: boolean("runtime_remediation").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     byOwner: index("sites_by_owner").on(t.ownerId),
     byShareToken: uniqueIndex("sites_by_share_token").on(t.shareToken),
+    byStatementToken: uniqueIndex("sites_by_statement_token").on(t.statementToken),
   }),
 );
 
@@ -162,6 +196,69 @@ export const findingExplanations = pgTable("finding_explanations", {
   what: text("what").notNull(),
   fix: text("fix").notNull(),
 });
+
+/**
+ * A concrete before→after code fix for a finding — the product's core differentiator: don't just say
+ * what's wrong, hand the owner the corrected markup to paste into their builder. Mirrors
+ * `findingExplanations` (keyed 1:1 by findingId, cascades when the finding is deleted) and follows the
+ * same results-only retention: we keep the computed fix, never a raw render.
+ *
+ * `kind` is "deterministic" (a templated, mechanical transform — `lang="en"`, `alt=""` for a
+ * decorative image) or "ai" (a GLM-derived suggestion for a judgment call — alt-text content,
+ * ambiguous link text). `needsReview` is true whenever a human must confirm wording: ALL ai fixes,
+ * and any deterministic fix that inserted a placeholder (e.g. an empty aria-label). Absence of a row
+ * is the natural default (no mechanical fix applies, AI unconfigured/over-cap, or a model miss).
+ */
+export const fixSuggestions = pgTable("fix_suggestions", {
+  findingId: integer("finding_id")
+    .primaryKey()
+    .references(() => findings.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  // Original element markup (the offending snippet).
+  before: text("before").notNull(),
+  // Corrected element markup the owner can paste in.
+  after: text("after").notNull(),
+  // True when a human must confirm the result before applying (AI fix or inserted placeholder).
+  needsReview: boolean("needs_review").notNull().default(false),
+  // What still needs a human decision, when anything does (e.g. "replace the placeholder label").
+  note: text("note"),
+  // Structured safe-attribute form of this fix, for Phase C runtime remediation — an array of
+  // {attr,value} restricted to SAFE_REMEDIATION_ATTRS (see @web-access/shared). Nullable: present
+  // only when the fix is a simple non-visual attribute set (lang/alt/role/aria-*); absent otherwise.
+  attributePatch: jsonb("attribute_patch").$type<AttributePatch[]>(),
+});
+
+/**
+ * Phase C runtime remediation — durable, per-site attribute patches the owner has EXPLICITLY approved
+ * for the embed to apply to the live DOM (a temporary, non-visual patch while the source is fixed).
+ *
+ * Follows the `issueOverrides` "persist across rescans by a stable key" pattern: keyed by
+ * (siteId, selector, attr) rather than by a per-scan findingId, so an approved fix survives re-scans
+ * (which recreate finding rows). Each row is one attribute set on one selector; the manifest builder
+ * groups rows by selector for the embed. `enabled` lets an owner pause a patch without deleting it.
+ * Nothing here is ever served unless `sites.runtimeRemediation` is also on. `attr` is constrained to
+ * SAFE_REMEDIATION_ATTRS at every write/read; `value` is a real owner-confirmed value (never a
+ * "TODO:" placeholder). Cascades when its site is deleted.
+ */
+export const remediations = pgTable(
+  "remediations",
+  {
+    id: serial("id").primaryKey(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    selector: text("selector").notNull(),
+    attr: text("attr").notNull(),
+    value: text("value").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // One approved value per (site, selector, attr): re-approving updates in place (upsert).
+    uniqRemediation: uniqueIndex("uniq_remediation").on(t.siteId, t.selector, t.attr),
+    bySite: index("remediations_by_site").on(t.siteId),
+  }),
+);
 
 /**
  * Durable issue lifecycle, overlaid on the per-scan findings. A "finding" is recreated on every

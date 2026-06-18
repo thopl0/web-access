@@ -1,11 +1,15 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
-import { ChevronDown, Code2, FileText, Layers, MapPin, Sparkles } from "lucide-react";
+import { useId, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { AlertTriangle, Check, ChevronDown, Code2, FileText, Layers, Loader2, MapPin, Sparkles, Zap } from "lucide-react";
 
 import type { ElementBox, PageShot } from "@/lib/server/report";
 import { cn } from "@/lib/utils";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
+import { CopyButton } from "@/components/dashboard/CopyButton";
+import { Button } from "@/components/ui/Button";
+import { approveRemediation } from "@/app/actions/remediation";
 
 /**
  * Serializable description of one offending element instance. The page builds
@@ -23,6 +27,16 @@ export type SpotElement = {
   box?: ElementBox;
   shot?: PageShot;
   explanation?: { title?: string; what: string; fix: string };
+  /** Concrete before→after code fix for this element, when one could be generated. */
+  fix?: {
+    kind: "deterministic" | "ai";
+    before: string;
+    after: string;
+    needsReview: boolean;
+    note?: string;
+    /** Structured safe-attribute form. Present => eligible to apply as a live fix. */
+    attributePatch?: { attr: string; value: string }[];
+  };
   /** Concrete pages this element family spans (set when the page is collapsed). */
   urls?: string[];
 };
@@ -104,6 +118,183 @@ function AiExplanation({ explanation }: { explanation: NonNullable<SpotElement["
   );
 }
 
+/** Strip a leading "TODO:" marker so placeholder text isn't mistaken for a real value. */
+function stripTodo(value: string): string {
+  return value.replace(/^\s*todo:?\s*/i, "");
+}
+
+/**
+ * One "Apply as live fix" control for a single attribute patch. Owner-confirmed safe-attr patch that
+ * the embed applies live. Placeholder ("TODO:") values force the owner to type a real value first;
+ * non-review patches (lang="en", alt="") apply with one click. Honest about being a temporary patch.
+ */
+function ApplyPatch({
+  siteId,
+  selector,
+  patch,
+  needsReview,
+}: {
+  siteId: string;
+  selector: string;
+  patch: { attr: string; value: string };
+  needsReview: boolean;
+}) {
+  const inputId = useId();
+  const [pending, startTransition] = useTransition();
+  const [applied, setApplied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Placeholder fixes ship a "TODO:" stand-in — the owner must supply the real value.
+  const placeholder = needsReview;
+  const [value, setValue] = useState(placeholder ? "" : patch.value);
+  // For placeholder fixes, surface the cleaned suggestion as an input hint.
+  const hint = placeholder ? stripTodo(patch.value) : "";
+
+  const apply = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await approveRemediation(siteId, { selector, attr: patch.attr, value });
+      if (res.ok) {
+        setApplied(true);
+      } else {
+        setError(res.error ?? "Couldn't apply this fix.");
+      }
+    });
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-green/30 bg-green/5 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-green">
+        <Zap className="size-3.5" aria-hidden strokeWidth={2.5} />
+        Apply as live fix
+      </p>
+      <p className="mt-1 text-xs text-fg-soft">
+        Applies instantly on your live site as a temporary patch — the real fix is to change your source.
+      </p>
+
+      {placeholder ? (
+        <div className="mt-2">
+          <label htmlFor={inputId} className="text-xs font-bold text-fg">
+            Value for <code className="text-fg-soft">{patch.attr}</code>
+          </label>
+          <input
+            id={inputId}
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={hint || "Enter a real value"}
+            disabled={applied}
+            className="mt-1 block w-full rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-2.5 py-1.5 text-sm text-fg"
+          />
+          {hint ? <p className="mt-1 text-xs text-fg-soft">Suggested: {hint}</p> : null}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-fg-soft">
+          Sets <code className="text-fg">{patch.attr}={'"'}{patch.value}{'"'}</code>
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {applied ? (
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-green" role="status">
+            <Check className="size-4" aria-hidden strokeWidth={2.5} />
+            Applied live
+          </span>
+        ) : (
+          <Button type="button" variant="green" size="sm" onClick={apply} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            {pending ? "Applying…" : "Apply as live fix"}
+          </Button>
+        )}
+      </div>
+
+      {error ? (
+        <p role="alert" aria-live="assertive" className="mt-2 text-sm font-bold text-pink">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Concrete before→after code fix for one element: two code blocks, a copy button for the
+ *  corrected markup, and a "needs review" badge for AI-generated or otherwise unverified fixes. */
+function FixBlock({
+  fix,
+  selector,
+  siteId,
+  runtimeEnabled,
+}: {
+  fix: NonNullable<SpotElement["fix"]>;
+  selector: string;
+  siteId: string;
+  runtimeEnabled: boolean;
+}) {
+  // AI fixes are judgment calls; needsReview covers those plus deterministic placeholder inserts.
+  const review = fix.kind === "ai" || fix.needsReview;
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--color-panel-line)] bg-surface p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue">
+          <Sparkles className="size-3.5" aria-hidden strokeWidth={2.5} />
+          Suggested fix
+        </p>
+        {review ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-pink/15 px-2 py-0.5 text-xs font-bold text-pink">
+            <AlertTriangle className="size-3 shrink-0" aria-hidden strokeWidth={2.5} />
+            Needs review
+          </span>
+        ) : null}
+      </div>
+
+      <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">Current</p>
+      <pre className="inset mt-1 overflow-x-auto p-2 text-sm text-fg">
+        <code>{fix.before}</code>
+      </pre>
+
+      <p className="mt-3 text-xs font-bold uppercase tracking-wide text-fg-soft">Should be</p>
+      <pre className="inset mt-1 overflow-x-auto p-2 text-sm text-fg">
+        <code>{fix.after}</code>
+      </pre>
+
+      {review && fix.note ? <p className="mt-2 text-xs text-fg-soft">{fix.note}</p> : null}
+
+      <div className="mt-3">
+        <CopyButton
+          text={fix.after}
+          label="Copy fixed code"
+          copiedLabel="Code copied"
+          className="text-xs"
+        />
+      </div>
+
+      {/* Phase C: apply safe attribute patches live, gated on the site's runtime toggle. */}
+      {fix.attributePatch && fix.attributePatch.length > 0 ? (
+        runtimeEnabled ? (
+          fix.attributePatch.map((patch, i) => (
+            <ApplyPatch
+              key={`${patch.attr}-${i}`}
+              siteId={siteId}
+              selector={selector}
+              patch={patch}
+              needsReview={review}
+            />
+          ))
+        ) : (
+          <p className="mt-3 text-xs text-fg-soft">
+            <Link
+              href={`/dashboard/${siteId}/settings`}
+              className="font-bold text-link underline underline-offset-2"
+            >
+              Turn on Runtime fixes in Settings
+            </Link>{" "}
+            to apply this instantly.
+          </p>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 function PageList({ paths, extra }: { paths: string[]; extra: number }) {
   const SHOWN = 5;
   const shown = paths.slice(0, SHOWN);
@@ -117,7 +308,17 @@ function PageList({ paths, extra }: { paths: string[]; extra: number }) {
   );
 }
 
-function PatternCard({ pattern, idBase }: { pattern: SpotPattern; idBase: string }) {
+function PatternCard({
+  pattern,
+  idBase,
+  siteId,
+  runtimeEnabled,
+}: {
+  pattern: SpotPattern;
+  idBase: string;
+  siteId: string;
+  runtimeEnabled: boolean;
+}) {
   const ex = pattern.example;
   return (
     <article
@@ -145,6 +346,10 @@ function PatternCard({ pattern, idBase }: { pattern: SpotPattern; idBase: string
 
       {ex.explanation ? <AiExplanation explanation={ex.explanation} /> : null}
 
+      {ex.fix ? (
+        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
+      ) : null}
+
       <PageList paths={pattern.pagePaths} extra={pattern.extraPages} />
 
       <ShowCode selector={ex.selector} snippet={ex.htmlSnippet} idBase={idBase} />
@@ -152,7 +357,17 @@ function PatternCard({ pattern, idBase }: { pattern: SpotPattern; idBase: string
   );
 }
 
-function PageCard({ page, idBase }: { page: SpotPage; idBase: string }) {
+function PageCard({
+  page,
+  idBase,
+  siteId,
+  runtimeEnabled,
+}: {
+  page: SpotPage;
+  idBase: string;
+  siteId: string;
+  runtimeEnabled: boolean;
+}) {
   return (
     <article
       id={idBase}
@@ -180,6 +395,9 @@ function PageCard({ page, idBase }: { page: SpotPage; idBase: string }) {
               label={`Screenshot of the affected element: ${el.selector}`}
             />
             {el.explanation ? <AiExplanation explanation={el.explanation} /> : null}
+            {el.fix ? (
+              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
+            ) : null}
             <ShowCode selector={el.selector} snippet={el.htmlSnippet} idBase={`${idBase}-${i}`} />
           </li>
         ))}
@@ -192,10 +410,14 @@ export function IssueSpots({
   patterns,
   pages,
   totalSpots,
+  siteId,
+  runtimeEnabled,
 }: {
   patterns: SpotPattern[];
   pages: SpotPage[];
   totalSpots: number;
+  siteId: string;
+  runtimeEnabled: boolean;
 }) {
   const [view, setView] = useState<View>("pattern");
   const [shownPatterns, setShownPatterns] = useState(PAGES_SHOWN);
@@ -290,10 +512,22 @@ export function IssueSpots({
         <div className="mt-4 flex flex-col gap-4 lg:mt-0">
           {view === "pattern"
             ? patterns.slice(0, shown).map((p, i) => (
-                <PatternCard key={`${railId}-pat-${i}`} pattern={p} idBase={`${railId}-pat-${i}`} />
+                <PatternCard
+                  key={`${railId}-pat-${i}`}
+                  pattern={p}
+                  idBase={`${railId}-pat-${i}`}
+                  siteId={siteId}
+                  runtimeEnabled={runtimeEnabled}
+                />
               ))
             : pages.slice(0, shown).map((p, i) => (
-                <PageCard key={`${railId}-page-${i}`} page={p} idBase={`${railId}-page-${i}`} />
+                <PageCard
+                  key={`${railId}-page-${i}`}
+                  page={p}
+                  idBase={`${railId}-page-${i}`}
+                  siteId={siteId}
+                  runtimeEnabled={runtimeEnabled}
+                />
               ))}
 
           {items.length > shown ? (

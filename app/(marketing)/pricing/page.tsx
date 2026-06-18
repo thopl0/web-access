@@ -8,70 +8,85 @@ import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/motion/Reveal";
 import { FindingsReport, Signpost } from "@/components/illustrations";
 import { FaqItem } from "@/components/pricing/FaqItem";
+import { UpgradeButton } from "@/components/pricing/UpgradeButton";
 import { SITE_NAME } from "@/lib/site";
+import { auth } from "@/auth";
+import { getUserPlan } from "@/lib/server/entitlements";
+import { billingConfigured, priceIdForPlan } from "@/lib/server/billing";
+import { PLANS, type Plan } from "@/lib/entitlements";
 
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Three plans for scanning your site the way real people use it. A free plan you'd actually keep, plus paid tiers for more sites and scheduled checks. Prices aren't set yet.",
+    "Three plans for scanning your site the way real people use it. A free plan you'd actually keep at $0, plus Pro at $29/mo and Business at $99/mo for more sites and scans that run on their own.",
 };
 
 type Tier = {
-  name: string;
+  /** Which entitlement row this card maps to. Numbers/labels below stay consistent with PLANS. */
+  plan: Plan;
   who: string;
-  /** Price is a placeholder — see the "TBD" note on the page. */
+  /** Real monthly price in whole dollars. */
   price: string;
-  period?: string;
+  period: string;
   features: string[];
-  cta: { href: string; label: string };
-  /** Render the price as a "Contact us" tier instead of a number. */
-  contact?: boolean;
 };
 
+// The three cards, in display order. Feature bullets are written by hand for voice, but every number
+// is the real figure from PLANS (lib/entitlements.ts) so the page can never drift from what's enforced.
 const TIERS: Tier[] = [
   {
-    name: "Free",
+    plan: "free",
     who: "For one site you want to keep honest.",
-    price: "$TBD",
-    period: "free to start",
+    price: "$0",
+    period: "free forever",
     features: [
-      "Scan one site",
-      "A set number of scans each month",
+      `Scan ${PLANS.free.maxSites} site`,
+      `${PLANS.free.scansPerMonth} scans each month`,
       "The core automated checks — contrast, labels, alt text, focus, reading order",
       "Plain-language fixes for every issue we find",
     ],
-    cta: { href: "/signup", label: "Start free" },
   },
   {
-    name: "Pro",
+    plan: "pro",
     who: "For a developer or small team shipping often.",
-    price: "$TBD",
+    price: "$29",
     period: "/ mo",
     features: [
-      "Several sites",
-      "Many more scans, plus scheduled runs",
-      "Auto-scan when a page changes",
-      "Full checks, with AI judgment on the fuzzy stuff like alt quality",
-      "Notifications when something new breaks",
+      `Up to ${PLANS.pro.maxSites} sites`,
+      `${PLANS.pro.scansPerMonth.toLocaleString("en-US")} scans each month`,
+      "AI judgment on the fuzzy stuff, like whether your alt text actually says something",
+      "Scheduled monitoring — re-scan on a timer and when a page changes",
+      "Downloadable artifacts: accessibility certificate, statement, and VPAT",
+      "Runtime fixes the embed can apply live, plus notifications when something new breaks",
     ],
-    cta: { href: "/signup", label: "Start free, upgrade later" },
   },
   {
-    name: "Business",
+    plan: "business",
     who: "For agencies and teams with a lot to watch.",
-    price: "Contact us",
-    contact: true,
+    price: "$99",
+    period: "/ mo",
     features: [
-      "Your whole team, with roles",
-      "A large pool of sites",
+      `Up to ${PLANS.business.maxSites} sites`,
+      `${PLANS.business.scansPerMonth.toLocaleString("en-US")} scans each month`,
+      `Team seats for up to ${PLANS.business.teamSeats} people`,
+      "Everything in Pro — AI judgment, monitoring, artifacts, runtime fixes",
       "Priority support from a real person",
-      "Onboarding help and a shared view of every site's health",
     ],
-    cta: { href: "/contact", label: "Talk to us" },
   },
 ];
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  // Who's looking? auth() returns null when logged out — no redirect, unlike getUser(). When signed
+  // in we read the current plan so each card can show "Current plan" instead of an upgrade CTA.
+  const session = await auth();
+  const userId = session?.user?.id ?? null;
+  const currentPlan: Plan | null = userId ? await getUserPlan(userId) : null;
+
+  // Is a real Stripe checkout possible at all? The secret key has to be set AND the per-plan price id
+  // configured. When either is missing the upgrade buttons degrade to a disabled state — we never call
+  // startCheckout when it can't work.
+  const billingReady = billingConfigured();
+
   return (
     <>
       {/* 1 · HERO ------------------------------------------------------------ */}
@@ -82,14 +97,13 @@ export default function PricingPage() {
               id="pricing-hero-title"
               className="text-5xl sm:text-6xl lg:text-7xl text-fg"
             >
-              Honest plans. The numbers aren&apos;t set yet.
+              Honest plans. Real prices.
             </h1>
             <p className="mt-6 text-lg sm:text-xl text-fg-soft max-w-2xl">
-              Here&apos;s the shape of it: a free plan you&apos;d actually keep,
-              and paid tiers for more sites and scans that run on their own. We
-              haven&apos;t fixed the prices, so every figure below says TBD. No
-              fake anchor, no &ldquo;was $X.&rdquo; When they&apos;re real,
-              they&apos;ll show up here.
+              A free plan you&apos;d actually keep at $0, and two paid tiers for
+              more sites and scans that run on their own — Pro at $29 a month,
+              Business at $99. No fake anchor, no &ldquo;was $X.&rdquo; The price
+              you see is the price you pay.
             </p>
           </Reveal>
           <Reveal direction="left" className="lg:justify-self-end">
@@ -108,10 +122,11 @@ export default function PricingPage() {
 
         <ul className="grid items-stretch gap-6 lg:grid-cols-3">
           {TIERS.map((tier, i) => {
-            const featured = tier.name === "Pro";
+            const featured = tier.plan === "pro";
+            const isCurrent = currentPlan === tier.plan;
             return (
               <Reveal
-                key={tier.name}
+                key={tier.plan}
                 as="li"
                 direction="up"
                 delay={i * 0.08}
@@ -126,7 +141,7 @@ export default function PricingPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="font-display text-2xl font-bold">
-                      {tier.name}
+                      {PLANS[tier.plan].label}
                     </h3>
                     {featured ? (
                       <Badge>Most popular</Badge>
@@ -142,43 +157,23 @@ export default function PricingPage() {
                     {tier.who}
                   </p>
 
-                  {/* Price area — every figure is a placeholder. */}
+                  {/* Price area — real monthly figures. */}
                   <div className="mt-6">
-                    {tier.contact ? (
-                      <p className="font-display text-4xl font-bold">
+                    <p className="flex items-baseline gap-2">
+                      <span className="font-display text-5xl font-bold">
                         {tier.price}
-                      </p>
-                    ) : (
-                      <p className="flex items-baseline gap-2">
-                        <span className="font-display text-5xl font-bold">
-                          {tier.price}
-                        </span>
-                        {tier.period ? (
-                          <span
-                            className={
-                              "text-sm " +
-                              (featured
-                                ? "text-[var(--ink)]/70"
-                                : "text-fg-soft")
-                            }
-                          >
-                            {tier.period}
-                          </span>
-                        ) : null}
-                      </p>
-                    )}
-                    {!tier.contact ? (
-                      <p
+                      </span>
+                      <span
                         className={
-                          "mt-1 text-sm " +
+                          "text-sm " +
                           (featured
                             ? "text-[var(--ink)]/70"
                             : "text-fg-soft")
                         }
                       >
-                        Pricing not finalized — TBD.
-                      </p>
-                    ) : null}
+                        {tier.period}
+                      </span>
+                    </p>
                   </div>
 
                   {/* Features. Check icons are decorative; the text carries it. */}
@@ -212,14 +207,13 @@ export default function PricingPage() {
                   </ul>
 
                   <div className="mt-8 pt-2">
-                    <Button
-                      href={tier.cta.href}
-                      variant={featured ? "blue" : "outline"}
-                      size="lg"
-                      className="w-full"
-                    >
-                      {tier.cta.label}
-                    </Button>
+                    {renderCta({
+                      tier,
+                      featured,
+                      isCurrent,
+                      loggedIn: Boolean(userId),
+                      billingReady,
+                    })}
                   </div>
                 </Card>
               </Reveal>
@@ -269,17 +263,18 @@ export default function PricingPage() {
               <p>
                 Yes, any time, both directions. Start free and move up when you
                 add sites or want scheduled scans. Drop back down if your needs
-                shrink. Nothing locks you in.
+                shrink. Nothing locks you in, and you&apos;ll always see the
+                price before you commit.
               </p>
             </FaqItem>
 
             <FaqItem question="What&apos;s actually in the free plan?">
               <p>
-                One site, a set number of scans a month, and the core automated
-                checks — contrast, missing labels, weak alt text, focus you
-                can&apos;t see, reading order. Every issue comes with the same
-                plain-language fix the paid plans get. It&apos;s a real tool,
-                not a teaser.
+                One site, {PLANS.free.scansPerMonth} scans a month, and the core
+                automated checks — contrast, missing labels, weak alt text,
+                focus you can&apos;t see, reading order. Every issue comes with
+                the same plain-language fix the paid plans get. It&apos;s a real
+                tool, not a teaser.
               </p>
             </FaqItem>
 
@@ -292,19 +287,21 @@ export default function PricingPage() {
               </p>
             </FaqItem>
 
-            <FaqItem question="When will prices be set?">
+            <FaqItem question="What do Pro and Business add?">
               <p>
-                Not yet — that&apos;s why every figure here says TBD. They&apos;re
-                placeholders, not the real numbers, and we won&apos;t pretend
-                otherwise. The moment they&apos;re decided, this page gets them.
+                More sites and a much bigger scan budget, plus the parts that run
+                without you: AI judgment on fuzzy things like alt-text quality,
+                scheduled monitoring, downloadable artifacts (certificate,
+                statement, VPAT), and live runtime fixes. Business adds team
+                seats and priority support on top.
               </p>
             </FaqItem>
 
             <FaqItem question="Do I need a card to start?">
               <p>
                 No. The free plan needs nothing but an email. You only reach for
-                a card if you decide to move up — and even then, you&apos;ll see
-                the price first, once {SITE_NAME} has one to show.
+                a card if you decide to move up to Pro or Business — and even
+                then, {SITE_NAME} shows you the price first.
               </p>
             </FaqItem>
           </div>
@@ -319,12 +316,12 @@ export default function PricingPage() {
               id="pricing-cta-title"
               className="text-4xl sm:text-5xl lg:text-6xl text-on-accent"
             >
-              Start free. Decide the rest later.
+              Start free. Upgrade when you outgrow it.
             </h2>
             <p className="mx-auto mt-5 max-w-2xl text-lg sm:text-xl text-on-accent/90">
-              Scan a site today and see what {SITE_NAME} finds. No card, no
-              price tag yet, no reason to wait. Got a bigger setup? Tell us about
-              it.
+              Scan a site today and see what {SITE_NAME} finds. No card to start,
+              no reason to wait. Need more sites or scans that run on their own?
+              Pro is $29 a month, Business is $99.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-4">
               <Button href="/signup" variant="yellow" size="lg">
@@ -343,5 +340,109 @@ export default function PricingPage() {
         </Reveal>
       </Section>
     </>
+  );
+}
+
+/**
+ * Pick the right call-to-action for a card given the visitor's auth state, their current plan, and
+ * whether billing is live. Kept as a helper so the card JSX stays readable. The matrix:
+ *
+ *  Free tier   — logged out: "Start free" → /signup. Logged in on free: disabled "Current plan".
+ *                Logged in on a paid plan: a plain link to /dashboard (no downgrade flow here).
+ *  Paid tiers  — current plan: disabled "Current plan". Logged out: "Start free, then upgrade"
+ *                → /signup?plan=…  Logged in: an UpgradeButton that runs startCheckout — disabled to
+ *                "Billing not available yet" when Stripe or the price id is missing.
+ */
+function renderCta({
+  tier,
+  featured,
+  isCurrent,
+  loggedIn,
+  billingReady,
+}: {
+  tier: Tier;
+  featured: boolean;
+  isCurrent: boolean;
+  loggedIn: boolean;
+  billingReady: boolean;
+}) {
+  const variant = featured ? "blue" : "outline";
+
+  // A signed-in visitor already on this exact plan — nothing to buy.
+  if (isCurrent) {
+    return <CurrentPlanButton />;
+  }
+
+  // Free tier.
+  if (tier.plan === "free") {
+    if (!loggedIn) {
+      return (
+        <Button href="/signup" variant={variant} size="lg" className="w-full">
+          Start free
+        </Button>
+      );
+    }
+    // Logged in but not on free (i.e. on a paid plan) — send them to the app rather than a downgrade.
+    return (
+      <Button href="/dashboard" variant={variant} size="lg" className="w-full">
+        Go to your dashboard
+      </Button>
+    );
+  }
+
+  // Paid tier, logged out — funnel through signup; the plan hint may be ignored, which is fine.
+  if (!loggedIn) {
+    return (
+      <Button
+        href={`/signup?plan=${tier.plan}`}
+        variant={variant}
+        size="lg"
+        className="w-full"
+      >
+        Start free, then upgrade
+      </Button>
+    );
+  }
+
+  // Paid tier, logged in. Only offer a real checkout when Stripe is configured AND this plan has a
+  // price id; otherwise show a disabled "Billing not available yet" so we never call an action that
+  // can't succeed.
+  const purchasable = billingReady && priceIdForPlan(tier.plan) !== null;
+  if (!purchasable) {
+    return (
+      <Button
+        type="button"
+        variant={variant}
+        size="lg"
+        className="w-full cursor-not-allowed opacity-60"
+        disabled
+      >
+        Billing not available yet
+      </Button>
+    );
+  }
+
+  return (
+    <UpgradeButton
+      plan={tier.plan as "pro" | "business"}
+      label={`Upgrade to ${PLANS[tier.plan].label}`}
+      variant={variant}
+    />
+  );
+}
+
+/** The disabled "you're already here" button shown on the visitor's current plan's card. */
+function CurrentPlanButton() {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="lg"
+      className="w-full cursor-default opacity-70"
+      disabled
+      aria-disabled="true"
+    >
+      Current plan
+    </Button>
   );
 }

@@ -12,7 +12,10 @@ import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
+import { eq } from "drizzle-orm";
+
 import { verifySession } from "@/lib/server/dal";
+import { db, schema } from "@/lib/server/db";
 import { getIssueDetail } from "@/lib/server/issues";
 import type { IssueElement, PageShot, RulePage } from "@/lib/server/report";
 import { buildAiFixPrompt } from "@/lib/aiFixPrompt";
@@ -38,6 +41,7 @@ function toSpotElement(el: IssueElement, shot?: PageShot | undefined): SpotEleme
     ...(el.box ? { box: el.box } : {}),
     ...(shot ? { shot } : {}),
     ...(el.explanation ? { explanation: el.explanation } : {}),
+    ...(el.fix ? { fix: el.fix } : {}),
     ...(el.urls ? { urls: el.urls } : {}),
   };
 }
@@ -75,6 +79,16 @@ export default async function IssueDetailPage({
 
   const ex = explainRule(issue.ruleId);
 
+  // Whether this site has runtime remediation turned on — gates the "apply live" control.
+  const siteRow = (
+    await db
+      .select({ rr: schema.sites.runtimeRemediation })
+      .from(schema.sites)
+      .where(eq(schema.sites.id, issue.siteId))
+      .limit(1)
+  )[0];
+  const runtimeEnabled = Boolean(siteRow?.rr);
+
   // Flatten every offending element across pages, carrying its page's shot.
   const instances: Instance[] = issue.pages.flatMap((p: RulePage) =>
     p.elements.map((el) => ({ path: p.path, el, shot: p.shot })),
@@ -86,6 +100,8 @@ export default async function IssueDetailPage({
     path: i.path,
     selector: i.el.selector,
     snippet: i.el.htmlSnippet,
+    // Flow the concrete before→after change into the prompt when we have one.
+    ...(i.el.fix ? { fix: i.el.fix } : {}),
   }));
   const aiPrompt = buildAiFixPrompt({
     ruleId: issue.ruleId,
@@ -277,7 +293,13 @@ export default async function IssueDetailPage({
       {/* All spots, grouped and navigable (own heading + controls). */}
       <div className="mt-10">
         {totalSpots > 0 ? (
-          <IssueSpots patterns={patterns} pages={pages} totalSpots={totalSpots} />
+          <IssueSpots
+            patterns={patterns}
+            pages={pages}
+            totalSpots={totalSpots}
+            siteId={issue.siteId}
+            runtimeEnabled={runtimeEnabled}
+          />
         ) : (
           <Panel>
             <p className="text-sm text-fg-soft">

@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
-import type { Finding, Impact, ScanReport, ScanStatus } from "@web-access/shared";
+import type { AttributePatch, Finding, Impact, ScanReport, ScanStatus } from "@web-access/shared";
 import { db, schema } from "./db";
 import { SEVERITY_RANK, emptyCounts } from "@/lib/severity";
 import type { Severity, SeverityCounts } from "@/lib/severity";
@@ -130,6 +130,24 @@ export type ElementExplanation = {
   fix: string;
 };
 
+/** A concrete before→after code fix for an element (the product's differentiator). `kind` is
+ *  "deterministic" (a safe mechanical transform) or "ai" (a GLM-suggested judgment call, always
+ *  flagged needsReview). Optional — absent when no mechanical fix applies, AI is unconfigured/over the
+ *  per-scan cap, or the model missed. Mirrors how `explanation` is loaded from its own table. */
+export type ElementFix = {
+  kind: "deterministic" | "ai";
+  /** Original element markup. */
+  before: string;
+  /** Corrected element markup the owner can paste in. */
+  after: string;
+  /** True when a human must confirm the result (all AI fixes, or an inserted placeholder). */
+  needsReview: boolean;
+  /** What still needs a human decision, when anything does. */
+  note?: string;
+  /** Structured safe-attribute form of this fix (Phase C). Present => eligible to apply as a live fix. */
+  attributePatch?: AttributePatch[];
+};
+
 /** Where an element sits on the page, in the full-page screenshot's coordinate space (CSS px).
  *  Drawn as a highlight box over the page's `shot`. */
 export type ElementBox = { x: number; y: number; w: number; h: number };
@@ -146,6 +164,8 @@ export type IssueElement = {
   box?: ElementBox;
   /** Plain-language, element-specific "what's wrong / how to fix", written by the AI judge. */
   explanation?: ElementExplanation;
+  /** Concrete before→after code fix for this element, when one could be generated. */
+  fix?: ElementFix;
   /** Concrete page urls this element was found on. Only set when the card collapses
    *  multiple pages (a pattern family), so instance-specific issues stay traceable. */
   urls?: string[];
@@ -368,6 +388,18 @@ export async function getSitePages(
   const explanationByFinding = new Map<number, (typeof explanationRows)[number]>();
   for (const e of explanationRows) explanationByFinding.set(e.findingId, e);
 
+  // Concrete before→after fixes for those findings (separate table, opt-in with evidence — same as
+  // explanations; the list/summary view skips this join). Attached to the element as `fix`.
+  const fixRows =
+    withEvidence && findingIds.length
+      ? await db
+          .select()
+          .from(schema.fixSuggestions)
+          .where(inArray(schema.fixSuggestions.findingId, findingIds))
+      : [];
+  const fixByFinding = new Map<number, (typeof fixRows)[number]>();
+  for (const f of fixRows) fixByFinding.set(f.findingId, f);
+
   // Fold concrete urls into pattern families (/promo/<ulid> → /promo/:id), keeping the
   // newest-first order of their first occurrence.
   const urlsByPattern = new Map<string, string[]>();
@@ -434,6 +466,7 @@ export async function getSitePages(
           }
           const ev = evidenceByFinding.get(r.id);
           const expl = explanationByFinding.get(r.id);
+          const fixRow = fixByFinding.get(r.id);
           el = {
             selector: r.selector,
             htmlSnippet: r.htmlSnippet,
@@ -453,6 +486,20 @@ export async function getSitePages(
                     ...(expl.title ? { title: expl.title } : {}),
                     what: expl.what,
                     fix: expl.fix,
+                  },
+                }
+              : {}),
+            ...(fixRow
+              ? {
+                  fix: {
+                    kind: fixRow.kind as ElementFix["kind"],
+                    before: fixRow.before,
+                    after: fixRow.after,
+                    needsReview: fixRow.needsReview,
+                    ...(fixRow.note ? { note: fixRow.note } : {}),
+                    ...(fixRow.attributePatch && fixRow.attributePatch.length
+                      ? { attributePatch: fixRow.attributePatch }
+                      : {}),
                   },
                 }
               : {}),
