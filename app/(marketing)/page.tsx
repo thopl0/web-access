@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   Contrast,
   Tags,
@@ -18,6 +19,7 @@ import { Card } from "@/components/ui/Card";
 import { Reveal } from "@/components/motion/Reveal";
 import { Parallax } from "@/components/motion/Parallax";
 import { HeroReportCard } from "@/components/home/HeroReportCard";
+import { ScanForm } from "@/components/home/ScanForm";
 import {
   BrowserScan,
   FindingsReport,
@@ -139,14 +141,17 @@ export default function Home() {
               {SITE_NAME} finds what&apos;s blocking them — and hands you the
               specific fix, in plain words.
             </p>
-            <div className="mt-8 flex flex-wrap gap-4">
-              <Button href={CTA.primary.href} variant="blue" size="lg">
+            <ScanForm />
+            <p className="mt-4 text-sm text-fg-soft">
+              Want monitoring and your whole site?{" "}
+              <Link href={CTA.primary.href} className="font-bold text-link underline underline-offset-2">
                 {CTA.primary.label}
-              </Button>
-              <Button href="/how-it-works" variant="outline" size="lg">
+              </Link>{" "}
+              ·{" "}
+              <Link href="/how-it-works" className="font-bold text-link underline underline-offset-2">
                 See how it works
-              </Button>
-            </div>
+              </Link>
+            </p>
           </Reveal>
 
           {/* Oversized hero scene: big doodle + the report card bleeding past a
