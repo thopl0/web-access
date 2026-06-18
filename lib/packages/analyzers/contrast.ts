@@ -39,11 +39,29 @@ async function collectTextOverImage(page: Page): Promise<TextOverImage[]> {
       return parts.join(" > ");
     }
 
+    /** Is a computed background-color fully opaque (alpha === 1)? `rgb(...)` always is. */
+    function isOpaqueColor(color: string): boolean {
+      const m = /^rgba?\(([^)]+)\)$/.exec(color);
+      if (!m) return false; // "transparent" or unparsed → treat as see-through
+      const parts = m[1]!.split(",").map((p) => p.trim());
+      return parts.length < 4 || parseFloat(parts[3]!) >= 1;
+    }
+
+    /**
+     * The background IMAGE the text is actually painted over, or null when there is none OR when a
+     * nearer opaque background-color hides everything below it. Walking up, the first element that
+     * has a background-image wins (it paints over its own color); but if we first hit an element with
+     * an OPAQUE background-color, the text sits on a solid color — axe-core already grades that, so it
+     * is NOT a "text over image" case and we bail out. This is what stops a readable card on an
+     * opaque background from being flagged just because the page behind it has a background image.
+     */
     function backgroundImageOf(node: Element): string | null {
       let el: Element | null = node;
       while (el) {
-        const bg = getComputedStyle(el).backgroundImage;
+        const style = getComputedStyle(el);
+        const bg = style.backgroundImage;
         if (bg && bg !== "none") return bg;
+        if (isOpaqueColor(style.backgroundColor)) return null;
         el = el.parentElement;
       }
       return null;
