@@ -5,6 +5,7 @@ import {
   CRAWL_QUEUE,
   MONITOR_QUEUE,
   RENDER_QUEUE,
+  isSafeRemediationAttr,
   pathAllowed,
   type CrawlJob,
   type Finding,
@@ -21,6 +22,21 @@ import { notifyCriticalScan, sendWeeklyDigests } from "../lib/server/notify";
 import { ownerEntitlements } from "../lib/server/entitlements";
 
 const connection = getConnection();
+
+/** Pull the alt VALUE back out of a vision `aiFix.after` snippet (`<img alt="…" src="…">`) so it can
+ *  be stored as a runtime-applicable {attr:"alt"} patch. Returns "" if no alt is parseable — the
+ *  caller then drops the attributePatch (the before→after markup still carries the fix). */
+function aiFixAlt(after: string): string {
+  const m = after.match(/\balt=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/);
+  if (!m) return "";
+  try {
+    // The snippet builds alt with JSON.stringify, so it's a JSON string literal — parse it back.
+    const parsed: unknown = JSON.parse(m[1]!.replace(/^'|'$/g, '"'));
+    return typeof parsed === "string" ? parsed : "";
+  } catch {
+    return "";
+  }
+}
 
 // Cropped visual evidence: screenshot just the offending element so the dashboard can SHOW it.
 const MAX_EVIDENCE = 40; // cap per scan — worst issues first
@@ -150,11 +166,22 @@ const worker = new Worker<RenderJob>(
 
       // Insert findings first so we can key cropped evidence to their ids. Postgres returns the
       // rows in insertion order, so `ids[i]` lines up with `findings[i]`.
+      //
+      // `aiFix` is a TRANSIENT field (a ready-made, pixel-grounded fix the vision judge handed us);
+      // the `findings` table has no such column, so strip it before the insert and keep an
+      // index-aligned record so the "Concrete fixes" block can store it directly below.
+      const aiFixByIdx = findings.map((f) => f.aiFix ?? null);
       let ids: { id: number }[] = [];
       if (findings.length > 0) {
         ids = await db
           .insert(schema.findings)
-          .values(findings.map((f) => ({ scanId, ...f })))
+          .values(
+            findings.map((f) => {
+              const row = { ...f };
+              delete row.aiFix; // transient — kept in aiFixByIdx, not a findings column
+              return { scanId, ...row };
+            }),
+          )
           .returning({ id: schema.findings.id });
       }
 
@@ -224,10 +251,43 @@ const worker = new Worker<RenderJob>(
       // enrichment, and best-effort: a failure here must not fail the scan, so fixes stay optional.
       let fixed = 0;
       try {
-        // Compute over the worst findings first, capped — so the budget goes to the highest-impact
-        // spots. `fixIdx[]` maps each computed result back to its row id (ids[i] lines up with findings[i]).
+        type FixRow = typeof schema.fixSuggestions.$inferInsert;
+        const rows: FixRow[] = [];
+
+        // (1) Vision ride-along fixes: a finding that carries a transient `aiFix` already has a
+        // pixel-grounded fix in hand (the Gemma judge wrote the alt while it had the image). Store it
+        // DIRECTLY — no model call, and exclude it from the GLM batch below so it can't be overwritten
+        // by a worse, text-derived guess. These are high-value, so they bypass the worst-first cap.
+        const handled = new Set<number>(); // finding indices already fixed here
+        findings.forEach((f, i) => {
+          const aiFix = aiFixByIdx[i];
+          if (!aiFix || !ids[i]) return;
+          handled.add(i);
+          // attributePatch (the runtime-applicable form) only when it's safe AND clearly a plain alt
+          // SET: that's the alt-text-inaccurate case (the image already exposes alt; we just replace
+          // its value). For decorative-misclassified the correct fix also involves removing the
+          // decorative declaration (role/aria-hidden), so a single alt patch isn't the whole story —
+          // omit it there and let the before→after markup carry the fix.
+          const attrPatch =
+            f.ruleId === "alt-text-inaccurate" && isSafeRemediationAttr("alt")
+              ? [{ attr: "alt" as const, value: aiFixAlt(aiFix.after) }]
+              : null;
+          rows.push({
+            findingId: ids[i]!.id,
+            kind: "ai",
+            before: f.htmlSnippet,
+            after: aiFix.after,
+            needsReview: true,
+            note: aiFix.note ?? "AI-generated from the image — verify it's accurate before publishing.",
+            attributePatch: attrPatch && attrPatch[0]!.value ? attrPatch : null,
+          });
+        });
+
+        // (2) Everything else: compute over the worst findings first, capped, EXCLUDING the findings
+        // already handled above. `fixIdx[]` maps each computed result back to its row id.
         const fixIdx = findings
           .map((_, i) => i)
+          .filter((i) => !handled.has(i))
           .sort((a, b) => {
             const ra = SEVERITY_RANK[findings[a]!.impact ?? "minor"] ?? 9;
             const rb = SEVERITY_RANK[findings[b]!.impact ?? "minor"] ?? 9;
@@ -235,22 +295,20 @@ const worker = new Worker<RenderJob>(
           })
           .slice(0, MAX_FIXES);
         const suggestions = await suggestFixes(fixIdx.map((i) => findings[i]!), { ai: ent.aiJudge });
-        const rows = suggestions
-          .map((s, j) => {
-            const i = fixIdx[j]!;
-            return s && ids[i]
-              ? {
-                  findingId: ids[i]!.id,
-                  kind: s.kind,
-                  before: s.before,
-                  after: s.after,
-                  needsReview: s.needsReview,
-                  note: s.note ?? null,
-                  attributePatch: s.attributePatch ?? null,
-                }
-              : null;
-          })
-          .filter((r): r is NonNullable<typeof r> => r !== null);
+        suggestions.forEach((s, j) => {
+          const i = fixIdx[j]!;
+          if (!s || !ids[i]) return;
+          rows.push({
+            findingId: ids[i]!.id,
+            kind: s.kind,
+            before: s.before,
+            after: s.after,
+            needsReview: s.needsReview,
+            note: s.note ?? null,
+            attributePatch: s.attributePatch ?? null,
+          });
+        });
+
         if (rows.length > 0) {
           await db.insert(schema.fixSuggestions).values(rows).onConflictDoNothing();
           fixed = rows.length;

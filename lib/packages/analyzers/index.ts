@@ -28,6 +28,11 @@ export { runColorOnlyJudge, collectColorRefs } from "./ai/colorOnly";
 export { runRepeatedLinksJudge, collectRepeatedLinkGroups } from "./ai/repeatedLinks";
 export { enrichFindings, type FindingExplanation } from "./ai/enrich";
 export { suggestFix, suggestFixes, deterministicFix, aiFixes } from "./fix";
+export {
+  buildBuilderPrompt,
+  type BuilderPromptIssue,
+  type BuilderPromptResult,
+} from "./fix";
 
 /**
  * Run all analyzers for the current build sequence against a rendered page.

@@ -15,6 +15,8 @@ import {
 import { ShareToggle } from "@/components/dashboard/ShareExport";
 import { StatementSettings } from "@/components/dashboard/StatementSettings";
 import { RuntimeFixSettings } from "@/components/dashboard/RuntimeFixSettings";
+import { BuilderPromptCard } from "@/components/dashboard/BuilderPromptCard";
+import { isPlatform, type Platform } from "@/lib/platform";
 import { listRemediations } from "@/app/actions/remediation";
 import { Download } from "lucide-react";
 import { verifySession } from "@/lib/server/dal";
@@ -63,6 +65,9 @@ export default async function SiteSettingsPage({
   const origin = await appOrigin();
   const snippet = embedSnippet(origin, site.id);
   const remediations = await listRemediations(site.id);
+
+  // The saved platform may be null (never set) or stale — narrow to a known Platform, default "other".
+  const platform: Platform = site.platform && isPlatform(site.platform) ? site.platform : "other";
 
   return (
     <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8">
@@ -138,6 +143,13 @@ export default async function SiteSettingsPage({
               </a>
             </div>
           </div>
+        </Section>
+
+        <Section
+          title="Builder fix prompt"
+          description="Generate one paste-ready message that fixes every issue, tailored to the tool you build your site with."
+        >
+          <BuilderPromptCard siteId={site.id} initialPlatform={platform} />
         </Section>
 
         <Section

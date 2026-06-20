@@ -77,6 +77,11 @@ export const sites = pgTable(
       .$type<StatementConfig>()
       .notNull()
       .default(DEFAULT_STATEMENT_CONFIG),
+    // The site-building platform the owner uses (Lovable/Wix/WordPress/… or "other"). Drives the
+    // builder-prompt generator's output: AI builders get a paste-back PROMPT, CMS/site builders get
+    // click-path STEPS. Plain text (no $type) to avoid a cross-package import of `lib/platform.ts`;
+    // validated with `isPlatform` at the app boundary. Nullable: unset until the owner picks one.
+    platform: text("platform"),
     // Master opt-in for Phase C runtime remediation: when true, the embed fetches the site's
     // approved attribute patches and applies them to the live DOM (non-visual only — alt/aria/lang/
     // role/title). Default false: nothing is ever served or applied until the owner turns this on

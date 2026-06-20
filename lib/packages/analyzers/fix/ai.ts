@@ -22,7 +22,11 @@ const MAX_ITEMS = 25;
  * Rules whose fix is a genuine judgment call about *content* (not a mechanical transform). These are
  * the only findings this generator touches; everything else returns null so `deterministicFix`
  * handles it. The alt-text set covers axe's `image-alt` (no alt at all) plus the Tier-3 alt-quality
- * verdicts from `ai/altText.ts`; `link-name` is the ambiguous/empty accessible-link-name case.
+ * verdicts from `ai/altText.ts`; `link-name` is the ambiguous/empty accessible-link-name case; the
+ * rest are the Tier-3 GLM judgment checks whose fix is element-level reworded CONTENT (the link text,
+ * heading, page title, error message, or colour-reliant phrasing the judge flagged). Set-based or
+ * non-element findings (e.g. `ambiguous-repeated-links`) are deliberately absent — there's no single
+ * before→after element to rewrite, so they're served by the explanation + AI-builder prompt instead.
  */
 const JUDGMENT_RULES = new Set([
   "image-alt",
@@ -30,6 +34,11 @@ const JUDGMENT_RULES = new Set([
   "alt-text-uninformative",
   "alt-text-redundant",
   "link-name",
+  "link-purpose-unclear",
+  "heading-uninformative",
+  "page-title-uninformative",
+  "form-error-unclear",
+  "color-only-reference",
 ]);
 
 /** Default note when the model doesn't supply one — every AI fix is filename/context-derived. */
@@ -50,6 +59,19 @@ const SYSTEM_PROMPT =
   "- For an empty/placeholder/filename alt, replace it with a short meaningful description. For an " +
   'alt that opens with "image of"/"photo of", drop that redundant lead-in. For an ambiguous link, ' +
   "make its accessible name describe the destination.\n" +
+  "- link-purpose-unclear: rewrite the link's visible text so it names where it goes (e.g. \"Read " +
+  'more" → "Read more about our pricing"); if the visible wording must stay, add an aria-label that ' +
+  "spells out the destination instead.\n" +
+  "- heading-uninformative: rewrite the heading's text so it briefly describes the section it labels " +
+  "(keep the same heading level/tag).\n" +
+  "- page-title-uninformative: rewrite the <title> so it names what the page is about, ideally with " +
+  'the brand (e.g. "Pricing — Acme"); keep the <title> tag.\n' +
+  "- form-error-unclear: rewrite the error message so it says what's expected or how to fix it (name " +
+  'the format or give an example, e.g. "Enter a valid email like name@example.com").\n' +
+  "- color-only-reference: reword the text so it doesn't rely on colour alone — name the control, add " +
+  'a label/icon/position cue (e.g. "click the green button" → "click the green Submit button").\n' +
+  "Use the issue message (the judge's specific reason) to ground each rewrite. You cannot see images " +
+  "or the rendered page, so keep rewrites conservative and never claim visual detail you can't verify.\n" +
   'Return ONLY JSON of the form {"items":[{"id":0,"after":"<corrected markup>","note":"..."}]} — ' +
   "exactly one entry per input id. `note` is one short sentence on what the owner should verify.";
 

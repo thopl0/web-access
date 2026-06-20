@@ -39,6 +39,14 @@ interface Verdict {
   confidence?: string;
   /** One plain sentence for a non-technical site owner (empty when ok). */
   reason: string;
+  /**
+   * A concise, accurate, PIXEL-GROUNDED alt text the model wrote for this image while it had the
+   * actual pixels in front of it — used only when a problem is flagged. Because the vision judge
+   * already paid to look at the image, this costs nothing extra and is far better than the text-only
+   * GLM fixer's filename/context guess. Optional/best-effort: a missing or garbled value just omits
+   * the ready-made fix; it never breaks the finding.
+   */
+  suggestedAlt?: string;
 }
 
 const ISSUE_META: Record<
@@ -62,8 +70,13 @@ const SYSTEM_PROMPT =
   "Be PRECISION-biased: only flag a CLEAR, defensible problem. When in any doubt, answer ok. Judge " +
   "only what is visible — never invent details. Also rate your confidence that the problem is real: " +
   '"high" = obvious/unambiguous, "medium" = likely but some doubt, "low" = a guess (use "high" when ' +
-  'you answer ok). Reply ONLY with JSON: {"issue":"...","confidence":"high|medium|low","reason":' +
-  '"..."} where reason is one plain, non-technical sentence (empty if ok).';
+  'you answer ok). When you flag a problem (alt-inaccurate or decorative-misclassified), ALSO write ' +
+  '"suggestedAlt": a concise, accurate alt text describing this image for a screen-reader user. ' +
+  'Describe ONLY what is visibly there — be precision-biased: no guesses, no invented detail, no ' +
+  'lead-in like "image of". Keep it short (one phrase or sentence). Leave suggestedAlt as "" when ' +
+  'you answer ok or have nothing reliable to say. Reply ONLY with JSON: {"issue":"...","confidence":' +
+  '"high|medium|low","reason":"...","suggestedAlt":"..."} where reason is one plain, non-technical ' +
+  'sentence (empty if ok).';
 
 /** Capture a quality-bounded JPEG of one element, or null if it can't be screenshotted cheaply. */
 async function shotOf(page: Page, c: ImageCandidate): Promise<string | null> {
@@ -116,16 +129,40 @@ async function judgeImage(page: Page, img: ImageCandidate, signal?: AbortSignal)
   // Abstention gate: drop a flag the model isn't confident enough about (see gate.ts).
   if (!meetsConfidence(parseConfidence(verdict.confidence))) return null;
 
-  return {
+  // The redacted element snippet shown in the report (src truncated to just the filename).
+  const htmlSnippet = imgSnippet(img.alt, img.filename);
+
+  const finding: Finding = {
     ruleId: meta.ruleId,
     source: "ai",
     tier: 3,
     wcag: ["1.1.1"],
     impact: meta.impact,
     selector: img.selector,
-    htmlSnippet: `<img alt=${JSON.stringify(img.alt)} src="…${img.filename}">`,
+    htmlSnippet,
     message: verdict.reason || "The image's text description does not match what the image shows.",
   };
+
+  // Free ride-along fix: we already saw the pixels, so the alt the model wrote here is pixel-grounded
+  // — strictly better than the text-only GLM fixer's filename/context guess. Attach it as the
+  // transient `aiFix` (stripped before the finding row is inserted; the worker turns it into the
+  // fix_suggestions row directly). Best-effort: a missing/garbled suggestedAlt just omits aiFix and
+  // the finding still stands.
+  const suggestedAlt = typeof verdict.suggestedAlt === "string" ? verdict.suggestedAlt.trim() : "";
+  if (suggestedAlt) {
+    finding.aiFix = {
+      after: imgSnippet(suggestedAlt, img.filename),
+      note: "AI-generated from the image — verify it's accurate before publishing.",
+    };
+  }
+
+  return finding;
+}
+
+/** The redacted `<img>` snippet used in findings/fixes: a given alt plus the filename-truncated src.
+ *  Shared so the finding's `htmlSnippet` and the ride-along `aiFix.after` differ ONLY in the alt. */
+function imgSnippet(alt: string, filename: string): string {
+  return `<img alt=${JSON.stringify(alt)} src="…${filename}">`;
 }
 
 /**

@@ -34,6 +34,21 @@ export const Finding = z.object({
   /** Human-readable description of the problem. */
   message: z.string(),
   helpUrl: z.string().url().optional(),
+  /**
+   * TRANSIENT, NEVER-PERSISTED: a ready-made fix a Tier-3 judge already had in hand when it produced
+   * the finding, so the worker can store it directly instead of paying for a second (and worse) fix
+   * pass. Today the sole producer is the Gemma VISION judge: it already pays to look at the image to
+   * decide the finding, so in that SAME call it also writes pixel-grounded alt text — far better than
+   * the text-only GLM fixer's filename/context guess. `after` is the corrected element markup;
+   * `note` is the owner-facing caveat.
+   *
+   * Lifecycle: PRODUCED by the judge (visionJudge.ts) → CONSUMED by the worker when building
+   * fix_suggestions (worker/index.ts: written straight into a fix row, and that finding is excluded
+   * from the GLM fix batch) → STRIPPED before the finding row is inserted (the `findings` table has
+   * NO such column). Optional/additive so every existing Finding creator and the eval harness keep
+   * compiling.
+   */
+  aiFix: z.object({ after: z.string(), note: z.string().optional() }).optional(),
 });
 export type Finding = z.infer<typeof Finding>;
 

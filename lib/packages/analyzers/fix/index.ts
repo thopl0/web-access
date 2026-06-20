@@ -13,6 +13,11 @@ import { aiFixes } from "./ai";
 export { FixKind, FixSuggestion } from "@web-access/shared";
 export { deterministicFix } from "./deterministic";
 export { aiFixes, aiFix } from "./ai";
+export {
+  buildBuilderPrompt,
+  type BuilderPromptIssue,
+  type BuilderPromptResult,
+} from "./builderPrompt";
 
 /**
  * Suggest a fix for a SINGLE finding: try the deterministic transform first; if it produces nothing,
