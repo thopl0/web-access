@@ -13,6 +13,7 @@ import type { Page } from "playwright";
 import type { Finding } from "@web-access/shared";
 import { ensureEvalHelpers } from "../util";
 import { aiConfigured, glmAsk, parseJsonObject } from "./glm";
+import { meetsConfidence, parseConfidence } from "./gate";
 
 /** An on-page image and the text context we can give the model, collected in-page. */
 export interface ImageCandidate {
@@ -116,6 +117,9 @@ export async function collectImages(page: Page): Promise<ImageCandidate[]> {
 /** The judge's verdict for one image. */
 interface Verdict {
   issue: "ok" | "uninformative-alt" | "filename-as-alt" | "redundant-phrasing";
+  /** How sure the model is this is a real, defensible problem. Drives the abstention gate (see
+   *  `gate.ts`): a flag below the floor is dropped rather than shown. Parsed leniently. */
+  confidence?: string;
   /** One-sentence, layperson explanation of what's wrong (empty when ok). */
   reason: string;
 }
@@ -133,7 +137,10 @@ const SYSTEM_PROMPT =
   "(screen readers already announce it as an image).\n" +
   "- ok: the alt text is a plausibly useful description, OR you lack enough text to judge.\n" +
   "Be conservative — only flag clear problems. Do NOT guess about visual accuracy (you can't see " +
-  'the image). Reply ONLY with JSON: {"issue":"...","reason":"..."} — reason is one plain sentence.';
+  "the image). Also rate your confidence that the problem is real and a screen-reader user would " +
+  'agree: "high" = obvious/unambiguous, "medium" = likely but some doubt, "low" = a guess. When you ' +
+  'answer ok, use "high". Reply ONLY with JSON: {"issue":"...","confidence":"high|medium|low",' +
+  '"reason":"..."} — reason is one plain sentence (empty when ok).';
 
 const ISSUE_META: Record<
   Exclude<Verdict["issue"], "ok">,
@@ -171,6 +178,8 @@ export async function judgeAltText(img: ImageCandidate): Promise<Finding | null>
   if (verdict.issue === "ok") return null;
   const meta = ISSUE_META[verdict.issue];
   if (!meta) return null; // unrecognised label from the model — ignore defensively
+  // Abstention gate: a flag the model isn't sure enough about is dropped, not shown (see gate.ts).
+  if (!meetsConfidence(parseConfidence(verdict.confidence))) return null;
 
   return {
     ruleId: meta.ruleId,
