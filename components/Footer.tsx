@@ -148,10 +148,10 @@ export function Footer() {
         </div>
       </div>
 
-      {/* Signature full-bleed wordmark. Decorative — the name is already announced above, so this is
-          hidden from assistive tech and exists only to close the page with a bold mark. */}
-      <div aria-hidden="true" className="overflow-hidden px-5 sm:px-8">
-        <p className="select-none whitespace-nowrap text-center font-display font-bold leading-[0.8] tracking-tight text-on-accent text-[clamp(1.25rem,6.2vw,9rem)]">
+      {/* Signature full-bleed wordmark — a yellow band closing the page. Decorative: the name is
+          already announced above, so this is hidden from assistive tech. */}
+      <div aria-hidden="true" className="overflow-hidden bg-yellow px-5 pt-4 pb-10 sm:px-8">
+        <p className="select-none whitespace-nowrap text-center font-display font-bold leading-none tracking-tight text-[var(--ink)] text-[clamp(1.25rem,6.2vw,9rem)]">
           {SITE_NAME}
         </p>
       </div>

@@ -37,7 +37,7 @@ export async function checkSnippetInstalled(
       signal: controller.signal,
       headers: {
         // Identify ourselves; some origins block unknown agents.
-        "user-agent": "web-access-verifier/1.0 (+https://access.ekcat.com)",
+        "user-agent": "web-access-verifier/1.0 (+https://webaccessibilitychecker.org)",
         accept: "text/html,application/xhtml+xml",
       },
     });
