@@ -80,6 +80,11 @@ export function SiteWizard() {
     setStep(2);
   }
 
+  // Form-level failure (currently only "you've hit your plan's site limit"). createSite returns it on
+  // `_form`, which the field inputs don't surface — without this banner the action just re-renders step
+  // 1 unchanged and looks like a silent page refresh. Pair it with an upgrade CTA so the next step is clear.
+  const formError = state?.errors?._form?.[0];
+
   return (
     <div className="flex flex-col gap-6">
       <Stepper step={step} />
@@ -90,6 +95,20 @@ export function SiteWizard() {
           <p className="mt-1 mb-5 text-sm text-fg-soft">
             We&apos;ll generate a unique site ID and a one-line script for it.
           </p>
+          {formError ? (
+            <div
+              role="alert"
+              className="mb-5 rounded-xl border border-pink/40 bg-pink/10 p-4"
+            >
+              <p className="font-display font-bold text-fg">{formError}</p>
+              <p className="mt-1 text-sm text-fg-soft">
+                Upgrade to a higher plan to monitor more sites.
+              </p>
+              <Button href="/pricing" variant="blue" size="sm" className="mt-3">
+                Upgrade your plan
+              </Button>
+            </div>
+          ) : null}
           <form action={formAction} noValidate className="flex flex-col gap-5">
             <TextField
               id={fieldId("name")}
