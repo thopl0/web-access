@@ -165,7 +165,8 @@ const worker = new Worker<RenderJob>(
       }
 
       // The owner's plan gates the AI tiers (judge / enrichment / AI fixes); the deterministic
-      // tiers + fixes always run. Unowned system sites (demo) resolve to full entitlements.
+      // tiers + fixes always run. Unowned sites are anonymous homepage trials → "Free" tier
+      // (aiJudge:false), so they stay deterministic-only and never spend metered Gemma / GLM.
       const ent = await ownerEntitlements(siteId);
 
       const findings = await runAnalysis(page, { ai: ent.aiJudge });

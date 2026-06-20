@@ -9,28 +9,16 @@ import { WcagScorecard, EaaReadiness } from "@/components/dashboard/Compliance";
 import { ScoreBadge } from "@/components/dashboard/ScoreBadge";
 import { SeveritySummary } from "@/components/dashboard/severity";
 import { ScanPoller } from "@/components/scan/ScanPoller";
+import { LegalRiskTeaser, ProFeatureGrid } from "@/components/scan/LockedUpsell";
 import { Button } from "@/components/ui/Button";
 import { db, schema } from "@/lib/server/db";
 import { getSitePages, rollupByRule } from "@/lib/server/report";
+import { upsellTeasers } from "@/lib/upsell";
 import { summarizeConformance } from "@/lib/wcag";
-import { SITE_NAME, CTA } from "@/lib/site";
+import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = { title: "Your scan", robots: { index: false } };
 export const dynamic = "force-dynamic";
-
-/** Sign-up nudge shown on the public trial result. */
-function UpsellBanner() {
-  return (
-    <div className="mt-8 flex flex-col items-start gap-4 border-[3px] border-[var(--ink)] bg-yellow p-5 shadow-ink sm:flex-row sm:items-center sm:justify-between">
-      <p className="font-display font-bold text-[var(--ink)]">
-        This is one page. Monitor your whole site — every release, automatically.
-      </p>
-      <Button href={CTA.primary.href} variant="blue" size="md" className="shrink-0">
-        {CTA.primary.label}
-      </Button>
-    </div>
-  );
-}
 
 export default async function PublicScanPage({
   params,
@@ -114,10 +102,10 @@ function Report({
 }) {
   const rules = rollupByRule(pages);
   const conformance = summarizeConformance(rules, { evaluated: true });
+  // Teaser counts derived purely from the FREE deterministic findings — no AI was run for this scan.
+  const teasers = upsellTeasers(pages);
   return (
     <>
-      <UpsellBanner />
-
       <div className="mt-8 flex flex-wrap items-center gap-6">
         <ScoreBadge counts={counts} pageCount={pages.length} />
       </div>
@@ -125,6 +113,9 @@ function Report({
       <div className="mt-6">
         <SeveritySummary counts={counts} pageCount={pages.length} />
       </div>
+
+      {/* "What to fix first" — the real legal-risk ranking, locked behind a free account. */}
+      <LegalRiskTeaser teasers={teasers} />
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <div className="panel p-5 sm:p-6 lg:col-span-2">
@@ -140,7 +131,8 @@ function Report({
         <SiteReport rules={rules} pages={pages} counts={counts} />
       </div>
 
-      <UpsellBanner />
+      {/* The AI-powered fix workflow this free scan deliberately did not run — reserved for Pro. */}
+      <ProFeatureGrid teasers={teasers} />
     </>
   );
 }

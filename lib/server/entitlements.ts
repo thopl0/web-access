@@ -45,8 +45,13 @@ export async function getUserEntitlements(userId: string): Promise<Entitlements>
 
 /**
  * Entitlements for a SITE's owner — the gate used where we only have a siteId, not a session: the
- * worker (AI judge / enrichment / AI fixes) and the public runtime-remediation manifest. Unowned
- * system sites have no plan, so they get full entitlements — a safe default for internal/system pages.
+ * worker (AI judge / enrichment / AI fixes) and the public runtime-remediation manifest.
+ *
+ * Unowned sites are now ONLY the homepage's anonymous trial scans (the old demo site is gone). Those
+ * must run the cheapest possible pipeline — the "Free" tier — so an anonymous scan never spends metered
+ * Gemma vision or GLM text: `free.aiJudge` is false, which the worker reads to skip ALL Tier-3 AI. The
+ * public scan page teases the locked premium tiers instead (see lib/upsell.ts). Do NOT restore full
+ * entitlements here — that was a demo-only convenience and every anonymous scan would pay for it.
  */
 export async function ownerEntitlements(siteId: string): Promise<Entitlements> {
   const rows = await db
@@ -55,7 +60,7 @@ export async function ownerEntitlements(siteId: string): Promise<Entitlements> {
     .where(eq(schema.sites.id, siteId))
     .limit(1);
   const ownerId = rows[0]?.ownerId;
-  if (!ownerId) return entitlementsFor("business"); // unowned demo/system site → full features
+  if (!ownerId) return entitlementsFor("free"); // unowned anonymous trial scan → deterministic only, no AI spend
   return entitlementsFor(await getUserPlan(ownerId));
 }
 
