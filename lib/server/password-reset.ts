@@ -1,62 +1,42 @@
 import "server-only";
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
 
-import { db, schema } from "./db";
+import { getConnection } from "./queue";
 
-// Password-reset token lifecycle. The raw token only ever exists in the email link; the DB stores
-// just its SHA-256 hash, so a database read can't mint a working reset link.
-const TOKEN_TTL_MS = 60 * 60 * 1000; // links are valid for 1 hour
-const RESEND_COOLDOWN_MS = 2 * 60 * 1000; // don't email the same account more than once per 2 min
+// Password-reset tokens live in Redis (already a core dependency), not Postgres: they're short-lived,
+// single-use, and ephemeral, so Redis's native TTL is a perfect fit — and it needs no schema/migration.
+// The raw token only ever exists in the email link; Redis stores just its SHA-256 hash → userId, so a
+// Redis dump can't mint a working link.
+const TOKEN_TTL_SECONDS = 60 * 60; // links are valid for 1 hour
+const COOLDOWN_SECONDS = 2 * 60; // one reset email per account per 2 minutes (anti-flood)
 
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
+const tokenKey = (hash: string) => `pwreset:token:${hash}`;
+const cooldownKey = (userId: string) => `pwreset:cooldown:${userId}`;
 
 /**
- * Issue a reset token for a user and return the RAW token (to embed in the email link). Returns null
- * when a token was issued for this user within the cooldown window — so repeated "forgot password"
- * clicks can't flood their inbox.
+ * Issue a reset token for a user and return the RAW token (for the email link). Returns null when a
+ * token was issued for this user within the cooldown window — so repeated "forgot password" clicks
+ * can't flood their inbox.
  */
 export async function createPasswordReset(userId: string): Promise<string | null> {
-  const recent = await db
-    .select({ createdAt: schema.passwordResetTokens.createdAt })
-    .from(schema.passwordResetTokens)
-    .where(eq(schema.passwordResetTokens.userId, userId))
-    .orderBy(desc(schema.passwordResetTokens.createdAt))
-    .limit(1);
-  if (recent[0] && Date.now() - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) {
-    return null;
-  }
+  const r = getConnection();
+  const fresh = await r.set(cooldownKey(userId), "1", "EX", COOLDOWN_SECONDS, "NX");
+  if (fresh === null) return null; // still within the cooldown
 
   const raw = randomBytes(32).toString("base64url");
-  await db.insert(schema.passwordResetTokens).values({
-    id: `prt_${randomUUID()}`,
-    userId,
-    tokenHash: hashToken(raw),
-    expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
-  });
+  await r.set(tokenKey(hashToken(raw)), userId, "EX", TOKEN_TTL_SECONDS);
   return raw;
 }
 
 /**
- * Validate and CONSUME a raw token. Returns the userId on success — and marks every reset token for
- * that user used, so the link is strictly single-use and any others are invalidated. Returns null if
- * the token is unknown, already used, or expired.
+ * Validate and CONSUME a raw token atomically (GETDEL), so a link works exactly once. Returns the
+ * userId on success, or null if the token is unknown, expired, or already used.
  */
 export async function consumePasswordReset(raw: string): Promise<string | null> {
-  const rows = await db
-    .select()
-    .from(schema.passwordResetTokens)
-    .where(eq(schema.passwordResetTokens.tokenHash, hashToken(raw)))
-    .limit(1);
-  const row = rows[0];
-  if (!row || row.usedAt || row.expiresAt.getTime() < Date.now()) return null;
-
-  await db
-    .update(schema.passwordResetTokens)
-    .set({ usedAt: new Date() })
-    .where(eq(schema.passwordResetTokens.userId, row.userId));
-  return row.userId;
+  const r = getConnection();
+  return r.getdel(tokenKey(hashToken(raw)));
 }

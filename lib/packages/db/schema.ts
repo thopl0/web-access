@@ -47,27 +47,6 @@ export const users = pgTable(
   }),
 );
 
-/** Single-use, time-limited password-reset tokens. The RAW token is emailed to the user; only its
- *  SHA-256 hash is stored, so reading the DB can't reveal a working link. A row is consumed (usedAt
- *  set) on a successful reset, and rows cascade-delete with the user. */
-export const passwordResetTokens = pgTable(
-  "password_reset_tokens",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    tokenHash: text("token_hash").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    usedAt: timestamp("used_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ({
-    byTokenHash: index("idx_prt_token_hash").on(t.tokenHash),
-    byUser: index("idx_prt_user").on(t.userId),
-  }),
-);
-
 /** A site a user registered. `id` IS the embed siteId baked into the <script> tag.
  *  `ownerId` is nullable so unowned system sites can exist — they never surface
  *  in any user's dashboard (which filters by owner). */
