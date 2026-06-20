@@ -33,6 +33,17 @@ export default function SignupPage() {
     >
       <GoogleSignIn />
       <AuthForm mode="signup" />
+      <p className="mt-5 text-sm text-fg-soft">
+        By creating an account you agree to our{" "}
+        <Link href="/terms" className="text-link underline underline-offset-2 font-bold">
+          terms of service
+        </Link>{" "}
+        and{" "}
+        <Link href="/privacy" className="text-link underline underline-offset-2 font-bold">
+          privacy policy
+        </Link>
+        .
+      </p>
     </AuthShell>
   );
 }

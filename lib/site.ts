@@ -22,6 +22,8 @@ export const NAV_LINKS = [
 /** Footer-only links (kept out of the top nav to avoid clutter). */
 export const FOOTER_LINKS = [
   { href: "/accessibility", label: "Accessibility statement" },
+  { href: "/privacy", label: "Privacy policy" },
+  { href: "/terms", label: "Terms of service" },
 ] as const;
 
 /** Where the header CTAs point. Auth is scaffolded; see /login and /signup. */
