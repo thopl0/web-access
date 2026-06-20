@@ -97,6 +97,17 @@ const RULES: Record<string, RuleExplainer> = {
     what: 'The description begins with "image of" / "photo of", which screen readers already announce — so users hear it twice.',
     fix: 'Drop the leading "image of"/"photo of" and just describe the content.',
   },
+  // AI judge (Tier 3, vision) — alt-text fidelity + decorative misclassification.
+  "alt-text-inaccurate": {
+    title: "Image description doesn't match the image",
+    what: "The image has a description, but it doesn't accurately or fully describe what the image actually shows — so screen-reader users get the wrong idea or miss the point of it.",
+    fix: "Rewrite the alt text to describe what's really in the image and why it matters here.",
+  },
+  "decorative-misclassified": {
+    title: "Meaningful image is marked as decorative",
+    what: "This image is set to be skipped by screen readers (treated as decoration), but it actually carries information or a function that blind users need — so they miss it entirely.",
+    fix: "Give the image real alt text describing its content or purpose, instead of marking it decorative.",
+  },
 };
 
 /**

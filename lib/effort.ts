@@ -12,6 +12,8 @@ const EFFORT: Record<string, Effort> = {
   "role-img-alt": "easy",
   "svg-img-alt": "easy",
   "object-alt": "easy",
+  "alt-text-inaccurate": "easy",
+  "decorative-misclassified": "easy",
   label: "easy",
   "label-title-only": "easy",
   "button-name": "easy",
