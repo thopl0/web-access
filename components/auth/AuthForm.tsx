@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useId } from "react";
+import Link from "next/link";
 import { AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -66,10 +67,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
       />
 
       {!isSignup ? (
-        // TODO(auth): wire to a real password-reset flow when it exists. Until
-        // then it's plain text, not a dead link that traps keyboard focus.
         <p className="-mt-1 text-sm text-fg-soft">
-          Forgot your password? Reset is coming soon.
+          <Link
+            href="/forgot-password"
+            className="text-link underline underline-offset-2 font-bold"
+          >
+            Forgot your password?
+          </Link>
         </p>
       ) : null}
 
