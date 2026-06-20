@@ -144,8 +144,12 @@ const ISSUE_META: Record<
   "redundant-phrasing": { ruleId: "alt-text-redundant", impact: "minor" },
 };
 
-/** Ask GLM to judge one image's alt-text quality. Returns a Finding for a real problem, else null. */
-async function judgeImage(img: ImageCandidate): Promise<Finding | null> {
+/**
+ * Ask GLM to judge one image's alt-text quality. Returns a Finding for a real problem, else null.
+ * Exported (not just used by `runAltTextJudge`) so the eval harness grades this EXACT path — same
+ * prompt, model call, and parsing the production scan uses — rather than a drifting copy.
+ */
+export async function judgeAltText(img: ImageCandidate): Promise<Finding | null> {
   // aria-hidden images are removed from the accessibility tree — their alt is never announced, so
   // there is no alt-text quality problem to report (any link-name issue is axe's job, not ours).
   if (img.ariaHidden) return null;
@@ -190,7 +194,7 @@ export async function runAltTextJudge(page: Page): Promise<Finding[]> {
   const images = await collectImages(page);
   if (images.length === 0) return [];
 
-  const results = await Promise.allSettled(images.map((img) => judgeImage(img)));
+  const results = await Promise.allSettled(images.map((img) => judgeAltText(img)));
   const findings: Finding[] = [];
   for (const r of results) {
     if (r.status === "fulfilled" && r.value) findings.push(r.value);
