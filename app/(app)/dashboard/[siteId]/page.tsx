@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { CircleCheck, ExternalLink, FileSearch, ShieldCheck } from "lucide-react";
 
 import { SiteReport } from "@/components/dashboard/SiteReport";
+import { StartHere } from "@/components/dashboard/StartHere";
 import { SiteStatusChip } from "@/components/dashboard/SiteStatusChip";
 import { InstallInstructions } from "@/components/dashboard/InstallInstructions";
 import { VerifyPanel } from "@/components/dashboard/VerifyPanel";
@@ -16,7 +17,7 @@ import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
-import { getIssuesTrend, getSitePages, pathOf, rollupByRule } from "@/lib/server/report";
+import { getIssuesTrend, getSitePages, pathOf, rollupByRule, siteStartHere } from "@/lib/server/report";
 import { explainRule } from "@/lib/explain";
 import { SEVERITY_RANK, type Severity } from "@/lib/severity";
 import { summarizeConformance } from "@/lib/wcag";
@@ -42,7 +43,11 @@ export default async function SiteReportsPage({
   if (!site) notFound();
 
   const verified = site.status === "verified";
-  const { pages, counts } = await getSitePages(siteId);
+  // `summary: true` loads the stored intelligent-report summary for the "Start here" card; the rest of
+  // the page is unchanged. `siteStartHere` then picks the most-urgent stored summary or, failing that,
+  // computes a deterministic site-wide legal-risk ranking — so the card is always populated.
+  const { pages, counts } = await getSitePages(siteId, { summary: true });
+  const startHere = siteStartHere(pages);
   const rules = rollupByRule(pages);
   const hasPages = pages.length > 0;
   const conformance = summarizeConformance(rules, { evaluated: hasPages });
@@ -158,6 +163,14 @@ export default async function SiteReportsPage({
         </EmptyState>
       ) : (
         <>
+          {/* "Start here": the plain-English summary + legal-risk triage — the first thing an owner
+              should read. Sits above the board so "what to fix first" leads the report. */}
+          {startHere ? (
+            <div className="mt-8">
+              <StartHere startHere={startHere} />
+            </div>
+          ) : null}
+
           {/* Board + the metric band and health panel, which re-scope to a page when one is opened. */}
           <SiteOverview
             pages={boardPages}

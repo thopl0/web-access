@@ -27,6 +27,11 @@ export { runFormErrorJudge, collectFormErrors } from "./ai/formErrors";
 export { runColorOnlyJudge, collectColorRefs } from "./ai/colorOnly";
 export { runRepeatedLinksJudge, collectRepeatedLinkGroups } from "./ai/repeatedLinks";
 export { enrichFindings, type FindingExplanation } from "./ai/enrich";
+export {
+  generateReportSummary,
+  type ReportSummary,
+  type TriageItem,
+} from "./ai/reportSummary";
 export { suggestFix, suggestFixes, deterministicFix, aiFixes } from "./fix";
 export {
   buildBuilderPrompt,

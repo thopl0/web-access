@@ -266,6 +266,46 @@ export const remediations = pgTable(
 );
 
 /**
+ * One row of the per-scan "start here" legal-risk triage list. Mirrors `TriageItem` in
+ * `analyzers/ai/reportSummary.ts` (the single source of truth) — inlined here, rather than imported,
+ * so the db package stays a dependency-light leaf (the analyzers barrel pulls in playwright + the AI
+ * judges; we never want that graph in the schema). Keep this shape in lock-step with `TriageItem`.
+ */
+export type ScanTriageItem = {
+  /** Stable rule id, e.g. "image-alt". */
+  ruleId: string;
+  /** CSS selector to the offending element, when the finding carries one. */
+  selector?: string;
+  /** Legal-risk tier: "high" | "medium" | "low" (from lib/legalRisk.ts). */
+  tier: "high" | "medium" | "low";
+  /** One plain sentence on why this issue draws legal complaints. */
+  why: string;
+};
+
+/**
+ * The "intelligent report" for one scan: a plain-English executive summary plus the legal-risk
+ * TRIAGE list (the "start here" shortlist), so a non-technical owner sees what actually draws ADA /
+ * EAA complaints first instead of an undifferentiated finding dump.
+ *
+ * Computed once in the worker (best-effort, after fixes) by `generateReportSummary` and stored in its
+ * own table — the same "per-scan computed artifact in its own table" pattern as `findingExplanations`
+ * / `fixSuggestions`: keyed 1:1 by scanId, cascades when the scan is deleted, and absent by default
+ * (so a scan with no summary is the natural state, and the report falls back to a deterministic one).
+ * `source` records how it was built: "ai" when GLM warmed the prose, "deterministic" otherwise.
+ */
+export const scanSummaries = pgTable("scan_summaries", {
+  scanId: text("scan_id")
+    .primaryKey()
+    .references(() => scans.id, { onDelete: "cascade" }),
+  // Short, plain-English executive summary for a non-technical owner.
+  plainSummary: text("plain_summary").notNull(),
+  // The legal-risk "start here" shortlist (highest risk first). See ScanTriageItem above.
+  triage: jsonb("triage").$type<ScanTriageItem[]>().notNull().default([]),
+  // "ai" (GLM rewrote the prose) or "deterministic" (assembled with no model call).
+  source: text("source").notNull(),
+});
+
+/**
  * Durable issue lifecycle, overlaid on the per-scan findings. A "finding" is recreated on every
  * scan, so to let owners resolve/ignore/snooze an issue *across* re-scans we key a stable status
  * by (siteId, issueKey) — where issueKey is a hash of rule + url-pattern + element identity

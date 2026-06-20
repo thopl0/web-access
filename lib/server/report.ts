@@ -4,6 +4,7 @@ import type { AttributePatch, Finding, Impact, ScanReport, ScanStatus } from "@w
 import { db, schema } from "./db";
 import { SEVERITY_RANK, emptyCounts } from "@/lib/severity";
 import type { Severity, SeverityCounts } from "@/lib/severity";
+import { rankByLegalRisk } from "@/lib/legalRisk";
 
 // Re-exported so existing importers of these from report.ts keep working; the
 // definitions now live in the client-safe lib/severity.ts.
@@ -187,6 +188,25 @@ export type IssueGroup = {
   elements: IssueElement[];
 };
 
+/** One row of the legal-risk "start here" triage list, as carried to the report UI. Mirrors the
+ *  worker's stored `ScanTriageItem` / the analyzers' `TriageItem`. `tier` drives the badge text. */
+export type TriageRow = {
+  ruleId: string;
+  selector?: string;
+  tier: "high" | "medium" | "low";
+  why: string;
+};
+
+/** The "intelligent report" for a scan: a plain-English executive summary + the legal-risk triage
+ *  shortlist. `source` is "ai" when GLM warmed the prose, "deterministic" otherwise. Optional on a
+ *  PageReport — only loaded when the caller opts in (`summary: true`), so list/summary queries that
+ *  don't render it never pay for the extra join. */
+export type ScanSummary = {
+  plainSummary: string;
+  triage: TriageRow[];
+  source: "ai" | "deterministic";
+};
+
 export type PageReport = {
   /** Display key: the concrete url for a single page, or the collapsed pattern (e.g. /promo/:id). */
   url: string;
@@ -205,6 +225,9 @@ export type PageReport = {
   groups: IssueGroup[];
   /** Full-page screenshot of the displayed scan, if captured — element boxes overlay onto it. */
   shot?: PageShot;
+  /** The stored intelligent-report summary for this page's displayed scan, when the caller opted in
+   *  (`summary: true`) and one was computed. Absent otherwise. */
+  summary?: ScanSummary;
 };
 
 export type SitePages = {
@@ -314,11 +337,14 @@ function pickShown(scans: ScanRow[]): ScanRow {
 
 export async function getSitePages(
   siteId: string,
-  opts: { evidence?: boolean; shareToken?: string } = {},
+  opts: { evidence?: boolean; shareToken?: string; summary?: boolean } = {},
 ): Promise<SitePages> {
   // The list view only needs counts, so it opts out of the evidence join. The detail view keeps it
   // (default) to emit element screenshot URLs.
   const withEvidence = opts.evidence ?? true;
+  // The intelligent-report summary is its own (heavier) join — opt-in, default OFF — so only the page
+  // that renders the "Start here" card pays for it; list/summary callers never load it.
+  const withSummary = opts.summary ?? false;
   // Image URLs are access-controlled; on a public share view we carry the site's share token so the
   // image routes authorize the anonymous viewer. Authed (owner) views pass no token.
   const tokenQuery = opts.shareToken ? `?token=${encodeURIComponent(opts.shareToken)}` : "";
@@ -375,6 +401,23 @@ export async function getSitePages(
   const shotByScan = new Map<string, PageShot>();
   for (const s of shotRows)
     shotByScan.set(s.scanId, { src: `/api/shot/${s.scanId}${tokenQuery}`, width: s.width, height: s.height });
+
+  // Intelligent-report summaries for the displayed scans (own table, opt-in). Keyed by scanId so each
+  // page card can surface its own "start here" summary + legal-risk triage.
+  const summaryRows =
+    withSummary && shownIds.length
+      ? await db
+          .select()
+          .from(schema.scanSummaries)
+          .where(inArray(schema.scanSummaries.scanId, shownIds))
+      : [];
+  const summaryByScan = new Map<string, ScanSummary>();
+  for (const s of summaryRows)
+    summaryByScan.set(s.scanId, {
+      plainSummary: s.plainSummary,
+      triage: s.triage,
+      source: s.source as ScanSummary["source"],
+    });
 
   // AI explanations for those findings (separate table, opt-in with evidence — only the detail
   // view needs them; the list/summary view passes evidence:false and skips this join too).
@@ -526,6 +569,7 @@ export async function getSitePages(
 
     const display = shown!; // every url has ≥1 scan, so the family always has one
     const shot = shotByScan.get(display.id);
+    const summary = summaryByScan.get(display.id);
     pages.push({
       url: grouped ? pattern : urls[0],
       grouped,
@@ -538,6 +582,7 @@ export async function getSitePages(
       groups,
       ...(display.error ? { error: display.error } : {}),
       ...(shot ? { shot } : {}),
+      ...(summary ? { summary } : {}),
     });
   }
 
@@ -550,6 +595,87 @@ export async function getSitePages(
   );
 
   return { siteId, pages, counts: siteCounts };
+}
+
+/** The site-level "Start here" content for the report header: a plain-English summary plus the
+ *  legal-risk triage shortlist. */
+export type SiteStartHere = {
+  /** Plain-English executive summary. From the AI/stored summary when present, else deterministic. */
+  plainSummary: string;
+  /** Highest-legal-risk issues first. From the stored summary, else a deterministic site-wide ranking. */
+  triage: TriageRow[];
+  /** Whether the prose came from the AI ("ai"), a stored deterministic summary, or a freshly computed
+   *  site-wide deterministic ranking ("computed"). Drives an honest provenance note in the UI. */
+  source: "ai" | "deterministic" | "computed";
+};
+
+/** Only high/medium-risk items belong in a "start here" list; low-risk ones are noise here (mirrors
+ *  the analyzers' `isTriageWorthy`). */
+const SITE_TRIAGE_TIERS = new Set<TriageRow["tier"]>(["high", "medium"]);
+/** Keep the site-level shortlist short so an owner isn't overwhelmed (mirrors `MAX_TRIAGE`). */
+const SITE_MAX_TRIAGE = 6;
+
+/**
+ * Build the report header's "Start here" content from already-loaded pages (no extra DB call). Prefers
+ * a stored per-scan summary (AI prose when the owner's plan warmed it, else its deterministic text):
+ * pages arrive worst-first, so the first page carrying a summary is the most urgent one to lead with.
+ * When NO scan has a stored summary (AI/worker hiccup, or pre-migration scans), it falls back to a
+ * deterministic SITE-WIDE ranking computed here via `rankByLegalRisk` over every aggregated finding —
+ * so the card is always populated and always honest about provenance via `source`.
+ *
+ * Pure over its input (`pages` must come from `getSitePages(..., { summary: true })` for the stored
+ * path; without it, only the computed fallback is available). Returns null only when there are no
+ * triage-worthy findings AND no stored summary — i.e. nothing meaningful to lead with.
+ */
+export function siteStartHere(pages: PageReport[]): SiteStartHere | null {
+  // 1) Prefer a stored summary from the worst page that has one.
+  const stored = pages.find((p) => p.summary)?.summary;
+  if (stored) {
+    return {
+      plainSummary: stored.plainSummary,
+      triage: stored.triage.filter((t) => SITE_TRIAGE_TIERS.has(t.tier)).slice(0, SITE_MAX_TRIAGE),
+      source: stored.source,
+    };
+  }
+
+  // 2) Deterministic site-wide fallback: rank every aggregated finding across the site by legal risk.
+  const seen = new Set<string>();
+  const items: { ruleId: string; wcag: string[]; impact: string | null; selector: string }[] = [];
+  for (const page of pages) {
+    for (const g of page.groups) {
+      for (const el of g.elements) {
+        const key = `${g.ruleId}\n${el.selector}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ ruleId: g.ruleId, wcag: g.wcag, impact: g.impact, selector: el.selector });
+      }
+    }
+  }
+  if (items.length === 0) return null;
+
+  const ranked = rankByLegalRisk(items);
+  const triage: TriageRow[] = [];
+  for (const { item, risk } of ranked) {
+    if (!SITE_TRIAGE_TIERS.has(risk.tier)) continue;
+    triage.push({
+      ruleId: item.ruleId,
+      ...(item.selector ? { selector: item.selector } : {}),
+      tier: risk.tier,
+      why: risk.why,
+    });
+    if (triage.length >= SITE_MAX_TRIAGE) break;
+  }
+  if (triage.length === 0) return null;
+
+  const top = triage.length === 1 ? "issue stands" : "issues stand";
+  return {
+    plainSummary:
+      `Of the accessibility issues found across this site, ${triage.length} ${top} out as the most ` +
+      `likely to shut visitors out and to draw an accessibility complaint under laws like the ADA or ` +
+      `the European Accessibility Act. Start with the list below.`,
+    triage,
+    source: "computed",
+  };
 }
 
 /** Compact, at-a-glance rollup for one site, shown on the sites list. Derived from

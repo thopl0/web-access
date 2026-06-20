@@ -12,7 +12,13 @@ import {
   type MonitorJob,
   type RenderJob,
 } from "@web-access/shared";
-import { runAnalysis, enrichFindings, suggestFixes, type FindingExplanation } from "@web-access/analyzers";
+import {
+  runAnalysis,
+  enrichFindings,
+  suggestFixes,
+  generateReportSummary,
+  type FindingExplanation,
+} from "@web-access/analyzers";
 import { db, schema } from "../lib/server/db";
 import { env } from "../lib/server/env";
 import { storage, shotKey, evidenceKey } from "../lib/server/storage";
@@ -317,6 +323,46 @@ const worker = new Worker<RenderJob>(
         console.error(`scan ${scanId} fix suggestion failed:`, err);
       }
 
+      // Intelligent report: the plain-English executive summary + the legal-risk "start here" triage
+      // list, stored per-scan (its own table, like explanations/fixes). `generateReportSummary` always
+      // returns a complete deterministic result and only calls GLM when the AI tier is on, so it never
+      // throws — but the surrounding try/catch + best-effort upsert keep a DB or model hiccup from ever
+      // failing the scan, exactly like enrichment/fixes above. Needs the site's display name for the
+      // summary prose — one light lookup (unowned/demo sites still have a name).
+      let summarized = 0;
+      try {
+        const siteRow = (
+          await db
+            .select({ name: schema.sites.name })
+            .from(schema.sites)
+            .where(eq(schema.sites.id, siteId))
+            .limit(1)
+        )[0];
+        const summary = await generateReportSummary(findings, {
+          siteName: siteRow?.name ?? "your site",
+          ai: ent.aiJudge,
+        });
+        await db
+          .insert(schema.scanSummaries)
+          .values({
+            scanId,
+            plainSummary: summary.plainSummary,
+            triage: summary.triage,
+            source: summary.source,
+          })
+          .onConflictDoUpdate({
+            target: schema.scanSummaries.scanId,
+            set: {
+              plainSummary: summary.plainSummary,
+              triage: summary.triage,
+              source: summary.source,
+            },
+          });
+        summarized = 1;
+      } catch (err) {
+        console.error(`scan ${scanId} report summary failed:`, err);
+      }
+
       await db
         .update(schema.scans)
         .set({ status: "complete", completedAt: new Date() })
@@ -336,7 +382,7 @@ const worker = new Worker<RenderJob>(
         if (acquired) void notifyCriticalScan(siteId, criticalCount).catch(() => {});
       }
 
-      return { findings: findings.length, evidence: evidenceRows.length, explained, fixed };
+      return { findings: findings.length, evidence: evidenceRows.length, explained, fixed, summarized };
     } finally {
       await context.close();
     }
