@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "tsx scripts/eval-ai.ts",
+    "expand-corpus": "tsx scripts/expand-corpus.ts",
     "build:embed": "tsup --config embed/tsup.config.ts",
     "dev:worker": "tsx watch worker/index.ts",
     "start:worker": "tsx worker/index.ts",

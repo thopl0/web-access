@@ -22,6 +22,7 @@ import type { Finding } from "@web-access/shared";
 import { collectImages, type ImageCandidate } from "./altText";
 import { gemmaAsk, gemmaConfigured, parseJsonObject } from "./gemma";
 import { meetsConfidence, parseConfidence } from "./gate";
+import { prefilterImagesForVision } from "./visionPrefilter";
 
 /** Per-page cap — each image is a model call (cost/latency). Fewer than the text judge's 12: vision
  *  calls are pricier and we also pay to screenshot each element. */
@@ -171,7 +172,13 @@ function imgSnippet(alt: string, filename: string): string {
  */
 export async function runVisionJudge(page: Page, signal?: AbortSignal): Promise<Finding[]> {
   if (!gemmaConfigured()) return [];
-  const images = (await collectImages(page)).slice(0, MAX_VISION_IMAGES);
+  // FREE GLM pre-filter FIRST, then the metered cap: GLM drops the clearly-moot candidates (over its
+  // text context only) so the smartest subset survives into the MAX_VISION_IMAGES slice — we spend
+  // Gemma budget on the images most likely to have a real pixel-level problem. The pre-filter is
+  // fail-open (no-ops when GLM is off, returns all on any error), so this never reduces coverage on
+  // its own; the cap below is the hard ceiling on metered Gemma calls regardless.
+  const candidates = await prefilterImagesForVision(await collectImages(page));
+  const images = candidates.slice(0, MAX_VISION_IMAGES);
   if (images.length === 0) return [];
 
   const results = await Promise.allSettled(images.map((img) => judgeImage(page, img, signal)));

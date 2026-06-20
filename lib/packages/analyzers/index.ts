@@ -20,6 +20,7 @@ export { aiConfigured, glmAsk, glmConfig } from "./ai/glm";
 export { gemmaConfigured, gemmaAsk, gemmaConfig } from "./ai/gemma";
 export { runAltTextJudge, collectImages } from "./ai/altText";
 export { runVisionJudge } from "./ai/visionJudge";
+export { prefilterImagesForVision } from "./ai/visionPrefilter";
 export { runLinkPurposeJudge, collectLinks } from "./ai/linkPurpose";
 export { runHeadingQualityJudge, collectHeadings } from "./ai/headingQuality";
 export { runPageTitleJudge, collectPageTitle } from "./ai/pageTitle";
