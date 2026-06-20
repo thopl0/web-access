@@ -108,6 +108,37 @@ const RULES: Record<string, RuleExplainer> = {
     what: "This image is set to be skipped by screen readers (treated as decoration), but it actually carries information or a function that blind users need — so they miss it entirely.",
     fix: "Give the image real alt text describing its content or purpose, instead of marking it decorative.",
   },
+  // AI judge (Tier 3, text) — GLM judgment checks axe can't make.
+  "link-purpose-unclear": {
+    title: "It's unclear where this link goes",
+    what: 'This link\'s wording (like "click here", "read more", or a raw web address) doesn\'t say where it leads, and the text around it doesn\'t make it clear either. Screen-reader users often pull up a list of just the links on a page, so a link that only says "read more" leaves them with no idea what they\'d be opening.',
+    fix: 'Give the link wording that names its destination (e.g. "Read more about our pricing" instead of "Read more"). If you can\'t change the visible text, add an aria-label that spells out where it goes.',
+  },
+  "heading-uninformative": {
+    title: "Heading doesn't describe its section",
+    what: 'This heading uses a vague or placeholder label (like "More", "Info", "Section 1", "Untitled" or "Welcome") that doesn\'t tell people what the section underneath is about. Screen-reader users often skim a page by jumping from heading to heading, so an uninformative heading leaves them with no idea what\'s there or whether it\'s worth reading.',
+    fix: 'Rename the heading so it briefly describes the content it sits above — for example change "Info" to "Shipping & returns" or "Section 1" to "Installing the app". A few specific words is plenty.',
+  },
+  "page-title-uninformative": {
+    title: "Page title doesn't describe the page",
+    what: 'The text in the browser tab (the page <title>) is a leftover template name like "Document" or "React App", just your brand name on its own, or a single generic word like "Home" — so people can\'t tell what this page is from their tab, bookmarks, history, or search results. This hits screen-reader users hardest, who hear the title first to know where they are.',
+    fix: 'Give the page a short title that names what it\'s about, ideally with your brand — for example "Pricing — Acme" or "How to install the SDK | Docs". Make each page\'s title unique to that page.',
+  },
+  "form-error-unclear": {
+    title: "Error message doesn't say how to fix it",
+    what: 'When this field is filled in wrongly, the message shown (like "Invalid", "Error", or "Required") tells the visitor something is wrong but not what to do about it. People who can\'t easily guess the right format get stuck and often give up on the form.',
+    fix: 'Change the error message to say what\'s expected — name the format, the rule, or give an example, e.g. "Enter a valid email like name@example.com" or "Password must be at least 8 characters".',
+  },
+  "color-only-reference": {
+    title: "Instructions rely on colour alone",
+    what: 'Some text tells visitors to use colour to find or understand something — for example "click the green button" or "required fields are in red". People who are colour-blind, and people using a screen reader (which never announces colour), can\'t tell which thing is meant, so they\'re stuck.',
+    fix: 'Add a second, non-colour way to identify the thing — name it ("the Submit button"), add a label, an icon, an asterisk, or its position — so the instruction works without seeing the colour.',
+  },
+  "ambiguous-repeated-links": {
+    title: "Several links share the same name but go to different places",
+    what: 'A few links on this page all read the same (like "Read more" or "Download") but each leads somewhere different. People using a screen reader often pull up a list of every link by name — they would see the same word repeated several times with no way to tell which one they want.',
+    fix: 'Give each link its own descriptive text that names where it goes (e.g. "Read more about the spring sale", "Download the 2024 report"), or add an aria-label that spells out the destination.',
+  },
 };
 
 /**
