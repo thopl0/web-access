@@ -161,25 +161,51 @@ const SYSTEM_PROMPT =
   "content it introduces, for a screen-reader user who navigates the page by jumping between " +
   "headings (WCAG 2.4.6 Headings and Labels). You are given the heading text and a clip of the " +
   "content that follows it. Judge ONE thing:\n" +
-  "- uninformative-heading: the heading text does NOT describe its section — it is a vague, " +
-  'placeholder, or boilerplate label ("More", "Info", "Section 1", "Untitled", "Heading", "Title", ' +
-  '"Welcome"/"Overview" sitting on a real content section, "Click here", "Read more", "Lorem ipsum") ' +
-  "that gives the user no idea what the section is about.\n" +
+  "- uninformative-heading: the heading text does NOT describe its section — it gives the user no " +
+  "idea what the section is about.\n" +
   "- ok: the heading is a reasonable label for its section, OR you lack enough section text to judge.\n" +
-  "Be CONSERVATIVE and PRECISION-FIRST — only flag a CLEAR, defensible problem; under ANY doubt " +
-  "answer ok. DO NOT FLAG:\n" +
-  '- a SHORT but genuinely descriptive heading ("Pricing", "FAQ", "Contact us", "Our team", ' +
-  '"Reviews", "Shipping") — terse is fine when it accurately names the section;\n' +
-  "- a heading that accurately summarises its section even in a few words;\n" +
-  '- a proper noun, product name, brand, person\'s name, or feature name used as a heading;\n' +
-  '- "Welcome"/"Overview"/"Introduction" when the following section genuinely IS a welcome/intro;\n' +
-  "- a heading you can't fairly judge because the section preview is empty or too thin;\n" +
-  "- a word from the examples above when it is actually a proper noun, product/edition name, or " +
-  'legal/program name that the section is genuinely about (e.g. "Section 8" the housing program, a ' +
-  'product edition literally named "More") — judge the heading AGAINST its section, not the word in ' +
-  "isolation.\n" +
-  'Also rate your confidence that the problem is real: "high" = obvious/unambiguous, "medium" = ' +
-  'likely but some doubt, "low" = a guess. When you answer ok, use "high". Reply ONLY with JSON: ' +
+  "\n" +
+  "TWO forces are in tension; balance them deliberately.\n" +
+  "\n" +
+  "(A) FLAG generic placeholder/boilerplate words — DECISIVELY. A heading that is a bare generic " +
+  'word like "More", "Info", "Information", "Details", "Overview", "Welcome", "Heading", "Title", ' +
+  '"Untitled", "Section 1"/"Section N", "Content", "Read more", "Learn more", "Click here", or ' +
+  '"Lorem ipsum" describes NO specific section — it would fit almost any section on any page. Flag ' +
+  "it as uninformative-heading EVEN WHEN there is real, specific content below it: good content does " +
+  "NOT rescue a generic heading, because the heading still fails to label it. Do NOT talk yourself " +
+  'out of flagging these because the section has substance. So "More" over an integrations list, ' +
+  '"Details" over product specs, "Overview" over a pricing table, and "Welcome" over a ' +
+  "product-promo section are ALL uninformative — a screen-reader user skimming headings learns " +
+  "nothing. When the heading is one of these generic placeholder words and is NOT a proper noun " +
+  '(see B), flag it with confidence "high".\n' +
+  "BEFORE flagging such a word, run ONE quick check against the section: does the section text " +
+  "literally name this word as a product/edition/program/brand, or (for a greeting word like " +
+  '"Welcome") genuinely greet/onboard the reader? If YES, it is the (B) carve-out below — answer ' +
+  "ok. If NO, flag it.\n" +
+  "\n" +
+  "(B) SPARE genuinely-descriptive and proper-noun headings — DO NOT FLAG:\n" +
+  '- a SHORT but accurate section label ("Pricing", "FAQ", "Contact us", "Our team", "Reviews", ' +
+  '"Shipping", "Warranty", "Ingredients", "Specifications", "Changelog", "Dosage", "How it works", ' +
+  '"Get started") — terse is fine when it names the actual topic of the section;\n' +
+  "- any heading that accurately summarises its section, even in a few words;\n" +
+  "- a proper noun, product/edition name, brand, person's name, program, or feature name that the " +
+  'section is genuinely ABOUT — e.g. "Section 8" the housing program, a product edition literally ' +
+  'named "More", "Welcome to <Org>", "AirPods Pro", "Ada Lovelace", "Single sign-on". Here the word ' +
+  "from (A) is the section's real, specific subject, not a placeholder — keep it ok;\n" +
+  '- "Welcome"/"Overview"/"Introduction" when the section genuinely IS a welcome/intro/overview of ' +
+  'exactly that kind of content — e.g. "Welcome" over an onboarding section that thanks the user ' +
+  "for signing up and walks them through setup is a GENUINE greeting, keep ok;\n" +
+  '- a numbered heading whose descriptive tail names the topic ("Step 1: Create an account");\n' +
+  "- a heading you cannot fairly judge because the section preview is empty or too thin.\n" +
+  "\n" +
+  "Also FLAG a heading that reads descriptive in isolation but MISMATCHES its section (e.g. " +
+  '"Pricing" over a team-bio section) — compare the heading against the actual section content.\n' +
+  "\n" +
+  "Decision test for (A) vs (B): does the heading name a SPECIFIC topic this particular section is " +
+  "about, or is it a generic word that could sit on any section? Generic word with no specific " +
+  "meaning here → flag. Specific name/topic that matches the section → ok. Decide, then commit.\n" +
+  'Rate your confidence the problem is real: "high" = a clear placeholder/mismatch, "medium" = ' +
+  'likely but some doubt, "low" = a genuine guess. When you answer ok, use "high". Reply ONLY with JSON: ' +
   '{"issue":"ok|uninformative-heading","confidence":"high|medium|low","reason":"..."} — reason is ' +
   "one plain sentence (empty when ok).";
 
