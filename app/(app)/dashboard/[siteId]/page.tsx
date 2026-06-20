@@ -5,6 +5,7 @@ import { CircleCheck, ExternalLink, FileSearch, ShieldCheck } from "lucide-react
 
 import { SiteReport } from "@/components/dashboard/SiteReport";
 import { StartHere } from "@/components/dashboard/StartHere";
+import { ProUpsell } from "@/components/dashboard/ProUpsell";
 import { ChangesSinceLastScan } from "@/components/dashboard/ChangesSinceLastScan";
 import { SiteStatusChip } from "@/components/dashboard/SiteStatusChip";
 import { InstallInstructions } from "@/components/dashboard/InstallInstructions";
@@ -119,6 +120,12 @@ export default async function SiteReportsPage({
     } satisfies BoardPage;
   });
 
+  // Lead the board with the home page (root path), then keep getSitePages' worst-first order for the
+  // rest. Array.sort is stable, so the non-home cards retain their "most issues first" ordering. (Only
+  // the board is reordered — `pages` stays worst-first so the "Start here" summary still leads with the
+  // most urgent page.)
+  boardPages.sort((a, b) => (a.path === "/" ? 0 : 1) - (b.path === "/" ? 0 : 1));
+
   return (
     <PageShell>
       <PageHeader
@@ -182,6 +189,14 @@ export default async function SiteReportsPage({
           {scanDelta?.hasPrevious && (scanDelta.resolved.length > 0 || scanDelta.introduced.length > 0) ? (
             <div className={startHere ? "mt-6" : "mt-8"}>
               <ChangesSinceLastScan delta={scanDelta} />
+            </div>
+          ) : null}
+
+          {/* Free owners (fixes withheld): lead with what Pro adds, right where they've just read
+              "what to fix first" — so the next step is upgrading to actually fix it. */}
+          {fixesLocked ? (
+            <div className={startHere ? "mt-6" : "mt-8"}>
+              <ProUpsell />
             </div>
           ) : null}
 

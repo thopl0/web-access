@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { Panel } from "@/components/dashboard/ui";
@@ -15,7 +18,9 @@ import type { SiteStartHere } from "@/lib/server/report";
  *  - the list is a real <ol> in risk order, with the tier announced as part of each item;
  *  - all icons are decorative (aria-hidden); meaning lives in text.
  *
- * Server component: pure presentation over the server-loaded `SiteStartHere`.
+ * Client component: pure presentation over the server-loaded `SiteStartHere`, plus a tiny bit of
+ * local state to collapse a long executive summary (the triage shortlist below is the actionable
+ * part and always stays open). The summary text is rendered verbatim, never truncated server-side.
  */
 
 /** Per-tier visual accent. Colour is REDUNDANT — `RISK_TIER_LABEL[tier]` text carries the meaning, so
@@ -41,6 +46,12 @@ function TierBadge({ tier }: { tier: RiskTier }) {
 
 export function StartHere({ startHere }: { startHere: SiteStartHere }) {
   const { plainSummary, triage, source } = startHere;
+
+  // Keep the card scannable: a long executive summary collapses to a few lines with a toggle, so the
+  // legal-risk shortlist below stays the focus instead of a wall of prose. Short summaries skip the
+  // toggle entirely (the threshold is a cheap length heuristic — no layout measurement needed).
+  const [expanded, setExpanded] = useState(false);
+  const isLong = plainSummary.length > 220;
 
   // Honest provenance, in words: AI-warmed prose vs a deterministic ranking. Never overstated.
   const provenance =
@@ -71,7 +82,24 @@ export function StartHere({ startHere }: { startHere: SiteStartHere }) {
         </div>
       </div>
 
-      <p className="mt-4 max-w-2xl text-fg leading-relaxed">{plainSummary}</p>
+      <p
+        className={[
+          "mt-4 max-w-2xl text-fg leading-relaxed",
+          isLong && !expanded ? "line-clamp-3" : "",
+        ].join(" ")}
+      >
+        {plainSummary}
+      </p>
+      {isLong ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mt-1.5 text-sm font-bold text-link underline-offset-2 hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
 
       {triage.length > 0 ? (
         <>
