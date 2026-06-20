@@ -4,7 +4,7 @@ import { IngestRequest, pathAllowed } from "@web-access/shared";
 import { db, schema } from "@/lib/server/db";
 import { enqueueCrawl, enqueueScan } from "@/lib/server/scan";
 import { notifySiteVerified } from "@/lib/server/notify";
-import { ownerScanUsage, withinPageQuota } from "@/lib/server/entitlements";
+import { ownerScanUsage, withinPageQuota, entitlementsFor } from "@/lib/server/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,9 +104,18 @@ export async function POST(req: Request) {
     return json({ skipped: "path_excluded" }, 200, origin);
   }
 
+  // Continuous, change-triggered re-scans are a Pro feature. The FIRST verification crawl above is
+  // free (it's the user's one free scan); these per-release embed pings are the automatic monitoring
+  // that fires on every later deploy, so gate them on the owner's monitoring entitlement. Free owners
+  // get a 200 (the embed treats it as accepted and won't retry) but no re-scan. Unowned trial sites
+  // (usage == null) aren't embed-monitored, so they fall through unchanged.
+  const usage = await ownerScanUsage(siteId);
+  if (usage && !entitlementsFor(usage.plan).monitoring) {
+    return json({ skipped: "monitoring_not_enabled" }, 200, origin);
+  }
+
   // Monthly page-quota gate. Return 200 (so the embed treats it as accepted and doesn't retry) but
   // DON'T enqueue once the owner is over budget. Unowned system sites have no quota.
-  const usage = await ownerScanUsage(siteId);
   if (usage && !withinPageQuota(usage.plan, usage.usedThisMonth)) {
     console.log(
       `[ingest] page quota reached for site ${siteId} (owner ${usage.ownerId}, plan ${usage.plan}) — skipping`,

@@ -44,6 +44,23 @@ export async function getUserEntitlements(userId: string): Promise<Entitlements>
 }
 
 /**
+ * Batch-resolve plans for many users in ONE query — the monitor tick's owner→plan lookup, where we'd
+ * otherwise call `getUserPlan` (or `ownerEntitlements`) once per selected row. Users not found map to
+ * nothing; callers fall back to "free" via `entitlementsFor(map.get(id))`. Returns a Map keyed by id.
+ */
+export async function getUserPlans(userIds: string[]): Promise<Map<string, Plan>> {
+  const ids = [...new Set(userIds)];
+  const map = new Map<string, Plan>();
+  if (ids.length === 0) return map;
+  const rows = await db
+    .select({ id: schema.users.id, plan: schema.users.plan })
+    .from(schema.users)
+    .where(inArray(schema.users.id, ids));
+  for (const r of rows) map.set(r.id, normalizePlan(r.plan));
+  return map;
+}
+
+/**
  * Entitlements for a SITE's owner — the gate used where we only have a siteId, not a session: the
  * worker (AI judge / enrichment / AI fixes) and the public runtime-remediation manifest.
  *

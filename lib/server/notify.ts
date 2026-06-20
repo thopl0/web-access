@@ -6,6 +6,7 @@ import { db, schema } from "./db";
 import { env } from "./env";
 import { sendEmail, emailLayout } from "./email";
 import { getUserIssues } from "./issues";
+import { getUserPlans, entitlementsFor } from "./entitlements";
 import type { ScanDelta } from "./verification";
 import { explainRule } from "@/lib/explain";
 import { SEVERITY_ORDER, type Severity } from "@/lib/severity";
@@ -133,8 +134,13 @@ export async function sendWeeklyDigests(): Promise<number> {
     .from(schema.users)
     .innerJoin(schema.sites, eq(schema.sites.ownerId, schema.users.id));
 
+  // The weekly digest is monitoring output → a Pro feature. Resolve every owner's plan in one query
+  // and skip those without the monitoring entitlement (free owners get no digest).
+  const plans = await getUserPlans(owners.map((o) => o.id));
+
   let sent = 0;
   for (const owner of owners) {
+    if (!entitlementsFor(plans.get(owner.id)).monitoring) continue;
     const issues = await getUserIssues(owner.id, { view: "open" });
     if (issues.length === 0) continue;
 

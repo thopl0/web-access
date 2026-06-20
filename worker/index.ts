@@ -26,7 +26,7 @@ import { getConnection, getMonitorQueue } from "../lib/server/queue";
 import { enqueueCrawl, enqueueScan } from "../lib/server/scan";
 import { notifyCriticalScan, notifyNewIssues, sendWeeklyDigests } from "../lib/server/notify";
 import { getScanDelta } from "../lib/server/verification";
-import { ownerEntitlements } from "../lib/server/entitlements";
+import { ownerEntitlements, getUserPlans, entitlementsFor } from "../lib/server/entitlements";
 
 const connection = getConnection();
 
@@ -371,9 +371,10 @@ const worker = new Worker<RenderJob>(
         .where(eq(schema.scans.id, scanId));
 
       // Alert the owner when a scan surfaces critical issues — deduped to once/day/site via a
-      // Redis cooldown key so re-scans don't spam.
+      // Redis cooldown key so re-scans don't spam. Monitoring alerts are a Pro feature, so free
+      // owners' (and unowned trial) scans complete silently — no email.
       const criticalCount = findings.filter((f) => f.impact === "critical").length;
-      if (criticalCount > 0) {
+      if (ent.monitoring && criticalCount > 0) {
         const acquired = await connection.set(
           `notify:critical:${siteId}`,
           "1",
@@ -387,17 +388,21 @@ const worker = new Worker<RenderJob>(
       // Regression alert: if this update introduced issues that weren't in the previous scan, tell the
       // owner what changed. Deduped per site via a 1-hour cooldown so a multi-page crawl (many scan
       // jobs) sends at most one — and we only compute the DB-heavy delta when not already on cooldown.
-      try {
-        const onCooldown = await connection.get(`notify:regression:${siteId}`);
-        if (!onCooldown) {
-          const delta = await getScanDelta(siteId);
-          if (delta.hasPrevious && delta.introduced.length > 0) {
-            const acquired = await connection.set(`notify:regression:${siteId}`, "1", "EX", 3600, "NX");
-            if (acquired) void notifyNewIssues(siteId, delta).catch(() => {});
+      // Like the critical alert, this is monitoring output → Pro-only, so skip the whole check (and its
+      // delta query) for free/unowned owners.
+      if (ent.monitoring) {
+        try {
+          const onCooldown = await connection.get(`notify:regression:${siteId}`);
+          if (!onCooldown) {
+            const delta = await getScanDelta(siteId);
+            if (delta.hasPrevious && delta.introduced.length > 0) {
+              const acquired = await connection.set(`notify:regression:${siteId}`, "1", "EX", 3600, "NX");
+              if (acquired) void notifyNewIssues(siteId, delta).catch(() => {});
+            }
           }
+        } catch (err) {
+          console.error(`scan ${scanId} regression check failed:`, err);
         }
-      } catch (err) {
-        console.error(`scan ${scanId} regression check failed:`, err);
       }
 
       return { findings: findings.length, evidence: evidenceRows.length, explained, fixed, summarized };
@@ -518,19 +523,33 @@ const monitorWorker = new Worker<MonitorJob>(
       .select({
         id: schema.sites.id,
         origin: schema.sites.origin,
+        ownerId: schema.sites.ownerId,
         scanConfig: schema.sites.scanConfig,
       })
       .from(schema.sites)
       .where(eq(schema.sites.status, "verified"));
 
+    // Continuous monitoring is a Pro feature. Resolve every distinct owner's plan in ONE query (vs.
+    // ownerEntitlements per row), then skip any site whose owner lacks the monitoring entitlement —
+    // free owners (and unowned sites) are silently dropped here. Their first scan + manual rescans
+    // still run; only the automatic re-crawl is withheld.
+    const plans = await getUserPlans(
+      rows.map((r) => r.ownerId).filter((v): v is string => v !== null),
+    );
+
     let queued = 0;
+    let skipped = 0;
     for (const s of rows) {
-      if (s.origin && s.scanConfig.autoCrawl) {
-        await enqueueCrawl(s.id, s.origin, "scheduled");
-        queued += 1;
+      if (!s.origin || !s.scanConfig.autoCrawl) continue;
+      const plan = s.ownerId ? plans.get(s.ownerId) : undefined;
+      if (!entitlementsFor(plan).monitoring) {
+        skipped += 1;
+        continue;
       }
+      await enqueueCrawl(s.id, s.origin, "scheduled");
+      queued += 1;
     }
-    return { eligible: rows.length, queued };
+    return { eligible: rows.length, queued, skipped };
   },
   { connection, concurrency: 1 },
 );
