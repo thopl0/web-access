@@ -6,6 +6,8 @@ import { db, schema } from "./db";
 import { env } from "./env";
 import { sendEmail, emailLayout } from "./email";
 import { getUserIssues } from "./issues";
+import type { ScanDelta } from "./verification";
+import { explainRule } from "@/lib/explain";
 import { SEVERITY_ORDER, type Severity } from "@/lib/severity";
 
 /** Absolute URL into the app, or undefined when APP_ORIGIN is unset (so we skip CTA buttons). */
@@ -74,6 +76,53 @@ export async function notifyCriticalScan(siteId: string, criticalCount: number):
       cta ? { label: "Review critical issues", url: cta } : undefined,
     ),
     text: `${n} found on "${site.name}". Open your dashboard to review.`,
+  });
+}
+
+/**
+ * "Your latest scan introduced new issues" — fired when a re-scan adds rules that weren't in the
+ * previous scan (a regression on an update). The worker dedupes per site via a short Redis cooldown,
+ * so a multi-page crawl sends at most one. Takes the already-computed delta so it doesn't re-query.
+ */
+export async function notifyNewIssues(siteId: string, delta: ScanDelta): Promise<void> {
+  const introduced = delta.introduced;
+  if (introduced.length === 0) return;
+
+  const rows = await db
+    .select({ name: schema.sites.name, ownerId: schema.sites.ownerId })
+    .from(schema.sites)
+    .where(eq(schema.sites.id, siteId))
+    .limit(1);
+  const site = rows[0];
+  if (!site) return;
+  const to = await ownerEmail(site.ownerId);
+  if (!to) return;
+
+  const n = `${introduced.length} new ${introduced.length === 1 ? "issue" : "issues"}`;
+  const fixed = delta.resolved.length;
+  const list = introduced
+    .slice(0, 5)
+    .map((r) => {
+      const title = explainRule(r.ruleId)?.title ?? r.message;
+      const spots = `${r.spots} ${r.spots === 1 ? "spot" : "spots"}`;
+      return `<li><strong>${title}</strong> — ${spots}${r.impact ? `, ${r.impact}` : ""}</li>`;
+    })
+    .join("");
+  const more = introduced.length > 5 ? `<p>…and ${introduced.length - 5} more.</p>` : "";
+  const cta = appUrl(`/dashboard/${siteId}`);
+
+  await sendEmail({
+    to,
+    category: "alerts",
+    subject: `${n} on “${site.name}” since your last scan`,
+    html: emailLayout(
+      `${n} on “${site.name}”`,
+      `<p>Your latest scan introduced <strong>${n}</strong> that weren't there last time` +
+        `${fixed > 0 ? ` (and confirmed <strong>${fixed}</strong> fixed)` : ""} — most likely a recent ` +
+        `change brought them in:</p><ul>${list}</ul>${more}`,
+      cta ? { label: "See what changed", url: cta } : undefined,
+    ),
+    text: `${n} on "${site.name}" since your last scan. Open your dashboard to see what changed.`,
   });
 }
 

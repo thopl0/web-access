@@ -24,7 +24,8 @@ import { env } from "../lib/server/env";
 import { storage, shotKey, evidenceKey } from "../lib/server/storage";
 import { getConnection, getMonitorQueue } from "../lib/server/queue";
 import { enqueueCrawl, enqueueScan } from "../lib/server/scan";
-import { notifyCriticalScan, sendWeeklyDigests } from "../lib/server/notify";
+import { notifyCriticalScan, notifyNewIssues, sendWeeklyDigests } from "../lib/server/notify";
+import { getScanDelta } from "../lib/server/verification";
 import { ownerEntitlements } from "../lib/server/entitlements";
 
 const connection = getConnection();
@@ -381,6 +382,22 @@ const worker = new Worker<RenderJob>(
           "NX",
         );
         if (acquired) void notifyCriticalScan(siteId, criticalCount).catch(() => {});
+      }
+
+      // Regression alert: if this update introduced issues that weren't in the previous scan, tell the
+      // owner what changed. Deduped per site via a 1-hour cooldown so a multi-page crawl (many scan
+      // jobs) sends at most one — and we only compute the DB-heavy delta when not already on cooldown.
+      try {
+        const onCooldown = await connection.get(`notify:regression:${siteId}`);
+        if (!onCooldown) {
+          const delta = await getScanDelta(siteId);
+          if (delta.hasPrevious && delta.introduced.length > 0) {
+            const acquired = await connection.set(`notify:regression:${siteId}`, "1", "EX", 3600, "NX");
+            if (acquired) void notifyNewIssues(siteId, delta).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error(`scan ${scanId} regression check failed:`, err);
       }
 
       return { findings: findings.length, evidence: evidenceRows.length, explained, fixed, summarized };
