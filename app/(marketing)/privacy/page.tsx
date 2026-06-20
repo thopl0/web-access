@@ -153,12 +153,17 @@ export default function PrivacyPage() {
             anti-abuse signals that enforce the weekly limit;
           </li>
           <li>
-            <strong>analytics cookies</strong> set by Google Analytics, which help us see how the
-            site is used — which pages people visit and roughly where they arrive from — so we can
-            improve it. These measure usage in aggregate and aren&apos;t used to identify you.
+            <strong>optional analytics cookies</strong> from Google Analytics, which help us see how
+            the site is used — which pages people visit and roughly where they arrive from — so we can
+            improve it. These measure usage in aggregate and aren&apos;t used to identify you, and we
+            only set them <strong>if you accept</strong>.
           </li>
         </ul>
-        <p>We don&apos;t use advertising or cross-site ad-tracking cookies.</p>
+        <p>
+          The analytics cookies are off until you opt in on the cookie banner. You can change or
+          withdraw that choice at any time with the &ldquo;Cookie settings&rdquo; link in the footer.
+          We don&apos;t use advertising or cross-site ad-tracking cookies.
+        </p>
       </LegalSection>
 
       <LegalSection n={7} id="retention" title="How long we keep it">

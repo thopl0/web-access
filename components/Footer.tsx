@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 
 import { Button } from "@/components/ui/Button";
+import { CookieSettingsButton } from "@/components/CookieSettingsButton";
 import { CTA, SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE } from "@/lib/site";
 
 /**
@@ -140,6 +141,9 @@ export function Footer() {
                 </Link>
               </li>
             ))}
+            <li>
+              <CookieSettingsButton className="font-bold text-on-accent/85 underline-offset-4 hover:text-on-accent hover:underline" />
+            </li>
           </ul>
         </div>
       </div>
