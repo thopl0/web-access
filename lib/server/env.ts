@@ -59,21 +59,26 @@ export const env = {
    *  Set to 0 to disable scheduled monitoring entirely. */
   MONITOR_INTERVAL_MS: Number(process.env.MONITOR_INTERVAL_MS ?? 24 * 60 * 60 * 1000),
   /** Email transport. Preference order (see lib/server/email.ts): SMTP (e.g. Purelymail) when
-   *  SMTP_HOST + SMTP_USER + a password are set; else the Resend HTTP API (RESEND_API_KEY + EMAIL_FROM);
-   *  else the layer no-ops (logs only).
+   *  SMTP_HOST + a password are set; else the Resend HTTP API (RESEND_API_KEY + EMAIL_FROM); else the
+   *  layer no-ops (logs only).
    *
-   *  SMTP (Purelymail): host smtp.purelymail.com, port 465 (implicit TLS). The username is a full
-   *  mailbox on the account; the password is PURELYMAIL_PASSWORD (or SMTP_PASSWORD). Purelymail lets you
-   *  send "From" any address you own once authenticated, so one login serves all four identities below.
-   *  SMTP_USER defaults to the info@ address — override it if the password belongs to a different mailbox. */
+   *  SMTP (Purelymail): host smtp.purelymail.com, port 465 (implicit TLS). Each of the four mailboxes
+   *  below authenticates AS ITSELF — the SMTP username for a category is its own `EMAIL_FROM_*` address,
+   *  so alerts@ sends as alerts@, contact@ as contact@, etc. The password is the shared SMTP_PASSWORD
+   *  (read from PURELYMAIL_PASSWORD); set a per-mailbox SMTP_PASSWORD_<ROLE> only if a mailbox has a
+   *  distinct password. */
   SMTP_HOST: process.env.SMTP_HOST,
   SMTP_PORT: Number(process.env.SMTP_PORT ?? 465),
-  SMTP_USER: process.env.SMTP_USER ?? "info@webaccessibilitychecker.org",
   SMTP_PASSWORD: process.env.SMTP_PASSWORD ?? process.env.PURELYMAIL_PASSWORD,
+  SMTP_PASSWORD_ALERTS: process.env.SMTP_PASSWORD_ALERTS,
+  SMTP_PASSWORD_INFO: process.env.SMTP_PASSWORD_INFO,
+  SMTP_PASSWORD_MARKETING: process.env.SMTP_PASSWORD_MARKETING,
+  SMTP_PASSWORD_CONTACT: process.env.SMTP_PASSWORD_CONTACT,
   /** Display name applied to every "From" header, e.g. `Web Accessibility Checker <alerts@…>`. */
   EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME ?? "Web Accessibility Checker",
-  /** Per-purpose "From" addresses. alerts = monitoring (critical scans, digests); info =
-   *  account/transactional (verification, receipts); marketing = newsletters; contact = the form. */
+  /** Per-purpose mailboxes — each is BOTH the "From" address AND the SMTP login for its category.
+   *  alerts = monitoring (critical scans, digests); info = account/transactional (verification,
+   *  receipts); marketing = newsletters; contact = the form. */
   EMAIL_FROM_ALERTS: process.env.EMAIL_FROM_ALERTS ?? "alerts@webaccessibilitychecker.org",
   EMAIL_FROM_INFO: process.env.EMAIL_FROM_INFO ?? "info@webaccessibilitychecker.org",
   EMAIL_FROM_MARKETING: process.env.EMAIL_FROM_MARKETING ?? "marketing@webaccessibilitychecker.org",

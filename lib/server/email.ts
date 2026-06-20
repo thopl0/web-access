@@ -20,11 +20,22 @@ export type Mail = {
   replyTo?: string;
 };
 
+/** The mailbox (and SMTP login) for each category — each identity sends as itself. */
 const FROM_ADDRESS: Record<EmailCategory, string> = {
   alerts: env.EMAIL_FROM_ALERTS,
   info: env.EMAIL_FROM_INFO,
   marketing: env.EMAIL_FROM_MARKETING,
   contact: env.EMAIL_FROM_CONTACT,
+};
+
+const CATEGORIES: EmailCategory[] = ["alerts", "info", "marketing", "contact"];
+
+/** Password each mailbox authenticates with: its own if set, else the shared Purelymail password. */
+const PASSWORD_FOR: Record<EmailCategory, string | undefined> = {
+  alerts: env.SMTP_PASSWORD_ALERTS ?? env.SMTP_PASSWORD,
+  info: env.SMTP_PASSWORD_INFO ?? env.SMTP_PASSWORD,
+  marketing: env.SMTP_PASSWORD_MARKETING ?? env.SMTP_PASSWORD,
+  contact: env.SMTP_PASSWORD_CONTACT ?? env.SMTP_PASSWORD,
 };
 
 /** "Web Accessibility Checker <alerts@…>" — a friendly From for the given category. */
@@ -33,37 +44,41 @@ function fromHeader(category: EmailCategory): string {
   return env.EMAIL_FROM_NAME ? `${env.EMAIL_FROM_NAME} <${addr}>` : addr;
 }
 
-function smtpConfigured(): boolean {
-  return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD);
+/** SMTP is usable for a category when the host and that mailbox's password are both present. */
+function smtpConfigured(category: EmailCategory): boolean {
+  return Boolean(env.SMTP_HOST && PASSWORD_FOR[category]);
 }
 function resendConfigured(): boolean {
   return Boolean(env.RESEND_API_KEY && env.EMAIL_FROM);
 }
 export function emailConfigured(): boolean {
-  return smtpConfigured() || resendConfigured();
+  const anySmtp = Boolean(env.SMTP_HOST) && CATEGORIES.some((c) => PASSWORD_FOR[c]);
+  return anySmtp || resendConfigured();
 }
 
-// One shared SMTP connection pool, created lazily on first send.
-let transporter: Transporter | null = null;
-function getTransport(): Transporter {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
+// One SMTP connection pool per identity, created lazily — each authenticates as its own mailbox.
+const transporters = new Map<EmailCategory, Transporter>();
+function getTransport(category: EmailCategory): Transporter {
+  let t = transporters.get(category);
+  if (!t) {
+    t = nodemailer.createTransport({
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_PORT === 465, // implicit TLS on 465; STARTTLS on 587
-      auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
+      auth: { user: FROM_ADDRESS[category], pass: PASSWORD_FOR[category] },
     });
+    transporters.set(category, t);
   }
-  return transporter;
+  return t;
 }
 
 export async function sendEmail(mail: Mail): Promise<boolean> {
   const category = mail.category ?? "info";
   const from = fromHeader(category);
 
-  if (smtpConfigured()) {
+  if (smtpConfigured(category)) {
     try {
-      await getTransport().sendMail({
+      await getTransport(category).sendMail({
         from,
         to: mail.to,
         subject: mail.subject,
