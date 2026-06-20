@@ -48,8 +48,8 @@ export const users = pgTable(
 );
 
 /** A site a user registered. `id` IS the embed siteId baked into the <script> tag.
- *  `ownerId` is nullable so seeded/system sites (e.g. "demo-site") can exist
- *  unowned — they never surface in any user's dashboard (which filters by owner). */
+ *  `ownerId` is nullable so unowned system sites can exist — they never surface
+ *  in any user's dashboard (which filters by owner). */
 export const sites = pgTable(
   "sites",
   {

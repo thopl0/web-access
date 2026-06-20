@@ -46,8 +46,7 @@ export async function getUserEntitlements(userId: string): Promise<Entitlements>
 /**
  * Entitlements for a SITE's owner — the gate used where we only have a siteId, not a session: the
  * worker (AI judge / enrichment / AI fixes) and the public runtime-remediation manifest. Unowned
- * system sites (e.g. the seeded demo-site) have no plan, so they get full entitlements — the public
- * showcase should exercise every feature.
+ * system sites have no plan, so they get full entitlements — a safe default for internal/system pages.
  */
 export async function ownerEntitlements(siteId: string): Promise<Entitlements> {
   const rows = await db
@@ -99,7 +98,7 @@ export async function countUserScansThisMonth(userId: string): Promise<number> {
 /**
  * Convenience for the ingest route / manual rescan: resolve a SITE's owner plan + this-month scan
  * usage in one place, so the request seams can call `withinScanQuota(plan, used)`. Returns null when
- * the site is unowned (e.g. the seeded demo-site) — callers treat null as "no quota gate applies".
+ * the site is unowned (a system site) — callers treat null as "no quota gate applies".
  */
 export async function ownerScanUsage(
   siteId: string,

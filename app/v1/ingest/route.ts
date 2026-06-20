@@ -58,8 +58,7 @@ export async function POST(req: Request) {
   }
   const { siteId, url, releaseId, templateFingerprint, renderedHtml } = parsed.data;
 
-  // Only accept scans for registered sites. (The public demo's "demo-site" is
-  // seeded — see scripts/seed.ts — so it keeps working.)
+  // Only accept scans for registered sites.
   const site = await db
     .select({
       id: schema.sites.id,
@@ -106,7 +105,7 @@ export async function POST(req: Request) {
   }
 
   // Monthly scan-quota gate. Return 200 (so the embed treats it as accepted and doesn't retry) but
-  // DON'T enqueue once the owner is over budget. Unowned sites (seeded demo-site) have no quota.
+  // DON'T enqueue once the owner is over budget. Unowned system sites have no quota.
   const usage = await ownerScanUsage(siteId);
   if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
     console.log(

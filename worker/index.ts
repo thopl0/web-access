@@ -328,7 +328,7 @@ const worker = new Worker<RenderJob>(
       // returns a complete deterministic result and only calls GLM when the AI tier is on, so it never
       // throws — but the surrounding try/catch + best-effort upsert keep a DB or model hiccup from ever
       // failing the scan, exactly like enrichment/fixes above. Needs the site's display name for the
-      // summary prose — one light lookup (unowned/demo sites still have a name).
+      // summary prose — one light lookup (unowned system sites still have a name).
       let summarized = 0;
       try {
         const siteRow = (
