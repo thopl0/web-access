@@ -143,17 +143,22 @@ export default function PrivacyPage() {
       </LegalSection>
 
       <LegalSection n={6} id="cookies" title="Cookies">
-        <p>We keep cookies to a minimum and use them only for things that make the service work:</p>
+        <p>We keep cookies to a minimum:</p>
         <ul>
           <li>
             a <strong>session cookie</strong> to keep you signed in;
           </li>
           <li>
             a long-lived <strong>first-party cookie</strong> on the free scan, used as one of the
-            anti-abuse signals that enforce the weekly limit.
+            anti-abuse signals that enforce the weekly limit;
+          </li>
+          <li>
+            <strong>analytics cookies</strong> set by Google Analytics, which help us see how the
+            site is used — which pages people visit and roughly where they arrive from — so we can
+            improve it. These measure usage in aggregate and aren&apos;t used to identify you.
           </li>
         </ul>
-        <p>We don&apos;t use advertising or cross-site tracking cookies.</p>
+        <p>We don&apos;t use advertising or cross-site ad-tracking cookies.</p>
       </LegalSection>
 
       <LegalSection n={7} id="retention" title="How long we keep it">

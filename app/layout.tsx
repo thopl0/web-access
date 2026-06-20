@@ -1,8 +1,15 @@
 import type { Metadata } from 'next';
 import { Space_Grotesk, Inter } from 'next/font/google';
+import { GoogleAnalytics } from '@next/third-parties/google';
 import './globals.css';
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE } from '@/lib/site';
 import { MotionProvider } from '@/components/motion/MotionProvider';
+
+// Google Analytics 4 measurement ID. The official @next/third-parties component loads gtag.js after
+// hydration AND sends a pageview on every App Router client-side navigation (the raw gtag snippet only
+// fires once on first load, so SPA navigations would go uncounted). Gated to production below so local
+// dev traffic never lands in the property.
+const GA_ID = 'G-H4ZB7JP4B5';
 
 // Display: heavy geometric grotesk with real personality at large sizes.
 const display = Space_Grotesk({
@@ -56,6 +63,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <MotionProvider>{children}</MotionProvider>
       </body>
+      {process.env.NODE_ENV === 'production' ? <GoogleAnalytics gaId={GA_ID} /> : null}
     </html>
   );
 }
