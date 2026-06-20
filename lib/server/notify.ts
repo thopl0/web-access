@@ -39,6 +39,7 @@ export async function notifySiteVerified(siteId: string): Promise<void> {
   const cta = appUrl(`/dashboard/${siteId}`);
   await sendEmail({
     to,
+    category: "info",
     subject: `“${site.name}” is verified ✓`,
     html: emailLayout(
       `“${site.name}” is verified`,
@@ -65,6 +66,7 @@ export async function notifyCriticalScan(siteId: string, criticalCount: number):
   const n = `${criticalCount} critical ${criticalCount === 1 ? "issue" : "issues"}`;
   await sendEmail({
     to,
+    category: "alerts",
     subject: `${n} found on “${site.name}”`,
     html: emailLayout(
       `${n} on “${site.name}”`,
@@ -97,6 +99,7 @@ export async function sendWeeklyDigests(): Promise<number> {
     const cta = appUrl("/dashboard/issues");
     const ok = await sendEmail({
       to: owner.email,
+      category: "alerts",
       subject: `Your weekly accessibility summary — ${issues.length} open ${issues.length === 1 ? "issue" : "issues"}`,
       html: emailLayout(
         "Your weekly accessibility summary",

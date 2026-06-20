@@ -58,8 +58,29 @@ export const env = {
   /** Interval between scheduled monitor ticks (re-crawl all eligible sites), ms. Default 24h.
    *  Set to 0 to disable scheduled monitoring entirely. */
   MONITOR_INTERVAL_MS: Number(process.env.MONITOR_INTERVAL_MS ?? 24 * 60 * 60 * 1000),
-  /** Email (Resend HTTP API). When RESEND_API_KEY + EMAIL_FROM are both set, alert emails are sent;
-   *  otherwise the email layer no-ops (logs only). */
+  /** Email transport. Preference order (see lib/server/email.ts): SMTP (e.g. Purelymail) when
+   *  SMTP_HOST + SMTP_USER + a password are set; else the Resend HTTP API (RESEND_API_KEY + EMAIL_FROM);
+   *  else the layer no-ops (logs only).
+   *
+   *  SMTP (Purelymail): host smtp.purelymail.com, port 465 (implicit TLS). The username is a full
+   *  mailbox on the account; the password is PURELYMAIL_PASSWORD (or SMTP_PASSWORD). Purelymail lets you
+   *  send "From" any address you own once authenticated, so one login serves all four identities below.
+   *  SMTP_USER defaults to the info@ address — override it if the password belongs to a different mailbox. */
+  SMTP_HOST: process.env.SMTP_HOST,
+  SMTP_PORT: Number(process.env.SMTP_PORT ?? 465),
+  SMTP_USER: process.env.SMTP_USER ?? "info@webaccessibilitychecker.org",
+  SMTP_PASSWORD: process.env.SMTP_PASSWORD ?? process.env.PURELYMAIL_PASSWORD,
+  /** Display name applied to every "From" header, e.g. `Web Accessibility Checker <alerts@…>`. */
+  EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME ?? "Web Accessibility Checker",
+  /** Per-purpose "From" addresses. alerts = monitoring (critical scans, digests); info =
+   *  account/transactional (verification, receipts); marketing = newsletters; contact = the form. */
+  EMAIL_FROM_ALERTS: process.env.EMAIL_FROM_ALERTS ?? "alerts@webaccessibilitychecker.org",
+  EMAIL_FROM_INFO: process.env.EMAIL_FROM_INFO ?? "info@webaccessibilitychecker.org",
+  EMAIL_FROM_MARKETING: process.env.EMAIL_FROM_MARKETING ?? "marketing@webaccessibilitychecker.org",
+  EMAIL_FROM_CONTACT: process.env.EMAIL_FROM_CONTACT ?? "contact@webaccessibilitychecker.org",
+  /** Mailbox that contact-form submissions are delivered to (defaults to the contact identity). */
+  CONTACT_INBOX: process.env.CONTACT_INBOX ?? "contact@webaccessibilitychecker.org",
+  /** Legacy fallback transport (Resend HTTP API). Used only when SMTP isn't configured. */
   RESEND_API_KEY: process.env.RESEND_API_KEY,
   EMAIL_FROM: process.env.EMAIL_FROM,
   /** Interval between weekly digest emails, ms. Default 7d. Set to 0 to disable digests. */

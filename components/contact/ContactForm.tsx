@@ -5,6 +5,7 @@ import { CircleCheck, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { TextField, TextAreaField } from "@/components/ui/Field";
+import { submitContact } from "@/app/actions/contact";
 import { cn } from "@/lib/utils";
 
 /** The topic options for the optional <select>. First entry is the placeholder. */
@@ -28,6 +29,7 @@ export function ContactForm() {
   const id = (name: string) => `${uid}-${name}`;
 
   const [errors, setErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -73,12 +75,15 @@ export function ContactForm() {
     }
 
     setSending(true);
+    setFormError(null);
 
-    // TODO: wire to real backend endpoint — POST these fields to the contact
-    // API and surface a real error state if the request fails.
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    const res = await submitContact(undefined, data);
 
     setSending(false);
+    if (res?.error) {
+      setFormError(res.error);
+      return;
+    }
     setSent(true);
 
     // Defer focus to the confirmation until after it renders.
@@ -122,6 +127,17 @@ export function ContactForm() {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
+      {/* Honeypot: hidden from people, irresistible to dumb bots. Submissions with it filled are
+          silently accepted server-side and never emailed. */}
+      <input
+        type="text"
+        name="company"
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        defaultValue=""
+        className="hidden"
+      />
       <fieldset
         aria-describedby={id("required-note")}
         className="flex flex-col gap-6 border-0 p-0 m-0 min-w-0"
@@ -198,6 +214,15 @@ export function ContactForm() {
           error={errors.message}
         />
       </fieldset>
+
+      {formError ? (
+        <p
+          role="alert"
+          className="border-[3px] border-[var(--ink)] bg-pink px-4 py-3 text-sm font-bold text-[var(--ink)]"
+        >
+          {formError}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-4">
         <Button type="submit" variant="blue" size="lg" disabled={sending} aria-disabled={sending}>
