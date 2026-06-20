@@ -14,6 +14,7 @@
  */
 import type { Finding, FixSuggestion } from "@web-access/shared";
 import { aiConfigured, glmAsk, parseJsonObject } from "../ai/glm";
+import { extractSafeAttrPatch } from "./attrPatch";
 
 /** Cap items per scan to bound tokens/latency; findings beyond this get no AI fix (stay null). */
 const MAX_ITEMS = 25;
@@ -140,6 +141,12 @@ export async function aiFixes(findings: Finding[]): Promise<(FixSuggestion | nul
     if (!reply) continue;
     for (const i of indices) {
       const f = findings[i]!;
+      // When the AI's change is a pure SAFE non-visual attribute set (an AI-written alt/aria-label),
+      // attach the structured patch so it's eligible for Phase C runtime remediation. The fix stays
+      // kind:"ai" + needsReview:true, so the UI's review-gate still forces a human to confirm the
+      // value (and the approval action re-validates) before anything goes live. `undefined` when the
+      // change isn't a clean attribute set → markup-only fix, exactly as before.
+      const attributePatch = extractSafeAttrPatch(f.htmlSnippet, reply.after);
       out[i] = {
         ruleId: f.ruleId,
         kind: "ai",
@@ -147,6 +154,7 @@ export async function aiFixes(findings: Finding[]): Promise<(FixSuggestion | nul
         after: reply.after,
         needsReview: true, // AI fixes are filename/context-derived — always confirm by a human.
         note: reply.note || DEFAULT_NOTE,
+        ...(attributePatch ? { attributePatch } : {}),
       };
     }
   }
