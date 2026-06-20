@@ -127,9 +127,7 @@ export function Footer() {
 
         {/* Legal row: copyright + the compact legal links. */}
         <div className="flex flex-col gap-4 text-sm text-on-accent/70 sm:flex-row sm:items-center sm:justify-between">
-          <p>
-            © {year} {SITE_NAME}. {SITE_NAME} is a working placeholder name.
-          </p>
+          <p>© {year} {SITE_NAME}. All rights reserved.</p>
           <ul className="flex flex-wrap items-center gap-x-6 gap-y-2">
             {LEGAL_ROW.map((link) => (
               <li key={link.href}>
