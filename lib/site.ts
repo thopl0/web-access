@@ -11,6 +11,9 @@ export const SITE_TAGLINE = "See your site the way real people actually use it."
 export const SITE_DESCRIPTION =
   "An embeddable tool that scans your site the way assistive tech does, finds what's blocking people, and hands you the exact fix for each issue.";
 
+/** Public contact address shown on the site. Mirrors the contact-form inbox (env CONTACT_INBOX). */
+export const CONTACT_EMAIL = "contact@webaccessibilitychecker.org";
+
 /** Primary nav — used by the header and the footer sitemap. */
 export const NAV_LINKS = [
   { href: "/how-it-works", label: "How it works" },

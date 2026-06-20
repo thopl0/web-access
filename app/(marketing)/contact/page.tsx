@@ -3,11 +3,10 @@ import { Mail, MessageSquare } from "lucide-react";
 
 import { Section, Container } from "@/components/ui/Section";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/motion/Reveal";
 import { EnvelopeSend } from "@/components/illustrations";
 import { ContactForm } from "@/components/contact/ContactForm";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, CONTACT_EMAIL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -78,11 +77,13 @@ export default function ContactPage() {
                 <p className="mt-2 text-fg-soft">
                   Write to us directly — same inbox, same people.
                 </p>
-                <p className="mt-3 font-display font-bold text-fg break-words">
-                  hello@example.com
-                </p>
-                <p className="mt-1 text-sm text-fg-soft">
-                  <Badge>Placeholder</Badge>
+                <p className="mt-3 font-display font-bold break-words">
+                  <a
+                    href={`mailto:${CONTACT_EMAIL}`}
+                    className="text-link underline underline-offset-2"
+                  >
+                    {CONTACT_EMAIL}
+                  </a>
                 </p>
               </Card>
 
