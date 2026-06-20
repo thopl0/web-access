@@ -12,7 +12,7 @@ import {
   isPaidPlan,
   normalizePlan,
   countUserSites,
-  countUserScansThisMonth,
+  countUserPagesThisMonth,
 } from "@/lib/server/entitlements";
 import { billingConfigured, priceIdForPlan } from "@/lib/server/billing";
 import { logout } from "@/app/actions/auth";
@@ -44,9 +44,9 @@ export default async function AccountPage() {
   const planStatus = rows[0]?.planStatus ?? null;
   const planRenewsAt = rows[0]?.planRenewsAt ?? null;
 
-  const [siteCount, scansThisMonth] = await Promise.all([
+  const [siteCount, pagesThisMonth] = await Promise.all([
     countUserSites(user!.id),
-    countUserScansThisMonth(user!.id),
+    countUserPagesThisMonth(user!.id),
   ]);
 
   const billingOn = billingConfigured();
@@ -113,7 +113,7 @@ export default async function AccountPage() {
             ) : null}
           </dl>
           <p className="mt-3 text-sm text-fg-soft">
-            {siteCount} / {ent.maxSites} sites · {scansThisMonth} / {ent.scansPerMonth} scans this
+            {siteCount} / {ent.maxSites} sites · {pagesThisMonth} / {ent.pagesPerMonth} pages this
             month
           </p>
           <BillingActions

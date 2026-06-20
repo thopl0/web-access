@@ -4,7 +4,7 @@ import { IngestRequest, pathAllowed } from "@web-access/shared";
 import { db, schema } from "@/lib/server/db";
 import { enqueueCrawl, enqueueScan } from "@/lib/server/scan";
 import { notifySiteVerified } from "@/lib/server/notify";
-import { ownerScanUsage, withinScanQuota } from "@/lib/server/entitlements";
+import { ownerScanUsage, withinPageQuota } from "@/lib/server/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,12 +104,12 @@ export async function POST(req: Request) {
     return json({ skipped: "path_excluded" }, 200, origin);
   }
 
-  // Monthly scan-quota gate. Return 200 (so the embed treats it as accepted and doesn't retry) but
+  // Monthly page-quota gate. Return 200 (so the embed treats it as accepted and doesn't retry) but
   // DON'T enqueue once the owner is over budget. Unowned system sites have no quota.
   const usage = await ownerScanUsage(siteId);
-  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+  if (usage && !withinPageQuota(usage.plan, usage.usedThisMonth)) {
     console.log(
-      `[ingest] scan quota reached for site ${siteId} (owner ${usage.ownerId}, plan ${usage.plan}) — skipping`,
+      `[ingest] page quota reached for site ${siteId} (owner ${usage.ownerId}, plan ${usage.plan}) — skipping`,
     );
     return json({ skipped: "quota_exceeded" }, 200, origin);
   }

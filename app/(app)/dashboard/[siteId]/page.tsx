@@ -48,7 +48,7 @@ export default async function SiteReportsPage({
   // `summary: true` loads the stored intelligent-report summary for the "Start here" card; the rest of
   // the page is unchanged. `siteStartHere` then picks the most-urgent stored summary or, failing that,
   // computes a deterministic site-wide legal-risk ranking — so the card is always populated.
-  const { pages, counts } = await getSitePages(siteId, { summary: true });
+  const { pages, counts, fixesLocked } = await getSitePages(siteId, { summary: true });
   const startHere = siteStartHere(pages);
   const rules = rollupByRule(pages);
   const hasPages = pages.length > 0;
@@ -229,6 +229,25 @@ export default async function SiteReportsPage({
               SiteReport renders its own control bar + results heading, so the Section
               title here is the only "Issues" heading (no double heading). */}
           <Section title="Issues">
+            {fixesLocked ? (
+              <Panel className="mb-6 border-l-4 border-l-[var(--color-link)]">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-display font-bold text-fg">
+                      Fixes are a Pro feature
+                    </p>
+                    <p className="mt-1 text-sm text-fg-soft">
+                      Your free plan shows every issue and why it matters. Upgrade to Pro for the
+                      paste-ready before→after fix on each one, AI judgment, and the copy-paste
+                      builder prompt.
+                    </p>
+                  </div>
+                  <Button href="/pricing" variant="blue" size="sm" className="shrink-0">
+                    Upgrade to Pro
+                  </Button>
+                </div>
+              </Panel>
+            ) : null}
             <SiteReport rules={rules} pages={pages} counts={counts} />
           </Section>
         </>

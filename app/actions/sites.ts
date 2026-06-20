@@ -21,8 +21,9 @@ import {
   getUserEntitlements,
   getUserPlan,
   ownerScanUsage,
-  withinScanQuota,
+  withinPageQuota,
 } from "@/lib/server/entitlements";
+import { domainOwnedByOther } from "@/lib/server/site-claims";
 
 export type SiteFormState =
   | {
@@ -88,6 +89,15 @@ export async function createSite(
     origin = new URL(siteUrl).origin;
   } catch {
     /* validated as a URL above; keep the raw value if parsing somehow fails */
+  }
+
+  // One domain, one account: block claiming a site another account already registered.
+  if (await domainOwnedByOther(origin, userId)) {
+    return {
+      errors: {
+        origin: ["That site is already registered to another account."],
+      },
+    };
   }
 
   // Generate a unique id; retry once on the (astronomically unlikely) collision.
@@ -160,14 +170,15 @@ export async function recrawlSite(siteId: string): Promise<{ ok: boolean; messag
   if (!site) return { ok: false, message: "Site not found." };
   if (!site.origin) return { ok: false, message: "Add a site URL first." };
 
-  // Monthly scan-quota gate. A re-crawl fans out into many scans, so block it once the owner is over
-  // budget rather than let the worker enqueue past the cap. (We gate the request seam, not enqueueScan
-  // itself, because the worker calls enqueueScan internally on every re-crawl — see lib/server/scan.ts.)
+  // Monthly page-quota gate. A re-crawl fans out into many page scans, so block it once the owner is
+  // over budget rather than let the worker enqueue past the cap. (We gate the request seam, not
+  // enqueueScan itself, because the worker calls enqueueScan internally on every re-crawl — see
+  // lib/server/scan.ts.)
   const usage = await ownerScanUsage(siteId);
-  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+  if (usage && !withinPageQuota(usage.plan, usage.usedThisMonth)) {
     return {
       ok: false,
-      message: "You've used this month's scan quota — upgrade for more scans.",
+      message: "You've used this month's page quota — upgrade for more pages.",
     };
   }
 
@@ -186,12 +197,12 @@ export async function rescanPage(
   const site = await ownedSite(siteId, userId);
   if (!site) return { ok: false, message: "Site not found." };
 
-  // Monthly scan-quota gate (see recrawlSite for why this lives at the request seam, not in scan.ts).
+  // Monthly page-quota gate (see recrawlSite for why this lives at the request seam, not in scan.ts).
   const usage = await ownerScanUsage(siteId);
-  if (usage && !withinScanQuota(usage.plan, usage.usedThisMonth)) {
+  if (usage && !withinPageQuota(usage.plan, usage.usedThisMonth)) {
     return {
       ok: false,
-      message: "You've used this month's scan quota — upgrade for more scans.",
+      message: "You've used this month's page quota — upgrade for more pages.",
     };
   }
 
@@ -240,6 +251,11 @@ export async function updateSite(
     origin = new URL(parsed.data.origin).origin;
   } catch {
     /* validated above */
+  }
+
+  // One domain, one account — same gate as createSite, so an edit can't claim another account's site.
+  if (await domainOwnedByOther(origin, userId)) {
+    return { errors: { origin: ["That site is already registered to another account."] } };
   }
 
   await db

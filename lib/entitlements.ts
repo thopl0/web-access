@@ -18,8 +18,18 @@ export type Entitlements = {
   label: string;
   /** Max number of sites the user may register. */
   maxSites: number;
-  /** Max scans across all the user's sites per calendar month. */
-  scansPerMonth: number;
+  /**
+   * Max PAGES scanned across all the user's sites per calendar month. One scan == one page render
+   * (a crawl fans out into one scan per page), so the scan-row count is the page count — this caps
+   * pages, and the UI is labelled in pages to match.
+   */
+  pagesPerMonth: number;
+  /**
+   * Concrete before→after fixes (the paste-ready corrections + the AI-builder prompt) are shown for
+   * this owner's scans. Free is DIAGNOSIS-ONLY: it still surfaces every issue and a plain-language
+   * reason it matters, but the fixes themselves are a paid feature.
+   */
+  fixes: boolean;
   /** Tier-3 AI judge (alt-text quality) runs for this owner's scans. */
   aiJudge: boolean;
   /** Scheduled re-crawl / change monitoring. */
@@ -36,15 +46,18 @@ export type Entitlements = {
  * The entitlement table. These limits are intentionally round, conservative placeholders — the point
  * is that they're centralized and trivially editable, not that they're final business numbers.
  *
- * Free   — one site, a usable monthly scan budget, deterministic checks only (no AI / artifacts).
- * Pro    — the "shipping team" plan: more sites, the AI judge, monitoring, artifacts, runtime fixes.
- * Business — agency scale: many sites, a big scan pool, team seats, everything Pro has.
+ * Free   — one site, a usable monthly PAGE budget, deterministic checks only. DIAGNOSIS-ONLY: it shows
+ *          what's wrong and why, but not the fixes, AI, or artifacts.
+ * Pro    — the "shipping team" plan: more sites/pages, the concrete fixes, the AI judge, monitoring,
+ *          artifacts, runtime fixes.
+ * Business — agency scale: many sites, a big page pool, team seats, everything Pro has.
  */
 export const PLANS: Record<Plan, Entitlements> = {
   free: {
     label: "Free",
     maxSites: 1,
-    scansPerMonth: 30,
+    pagesPerMonth: 30,
+    fixes: false,
     aiJudge: false,
     monitoring: false,
     artifacts: false,
@@ -54,7 +67,8 @@ export const PLANS: Record<Plan, Entitlements> = {
   pro: {
     label: "Pro",
     maxSites: 10,
-    scansPerMonth: 1000,
+    pagesPerMonth: 1000,
+    fixes: true,
     aiJudge: true,
     monitoring: true,
     artifacts: true,
@@ -64,7 +78,8 @@ export const PLANS: Record<Plan, Entitlements> = {
   business: {
     label: "Business",
     maxSites: 50,
-    scansPerMonth: 10000,
+    pagesPerMonth: 10000,
+    fixes: true,
     aiJudge: true,
     monitoring: true,
     artifacts: true,
@@ -88,12 +103,12 @@ export function canAddSite(plan: Plan | string | null | undefined, currentCount:
   return currentCount < entitlementsFor(plan).maxSites;
 }
 
-/** Whether a user on `plan` is still within their monthly scan budget given usage so far. */
-export function withinScanQuota(
+/** Whether a user on `plan` is still within their monthly PAGE budget given pages scanned so far. */
+export function withinPageQuota(
   plan: Plan | string | null | undefined,
   usedThisMonth: number,
 ): boolean {
-  return usedThisMonth < entitlementsFor(plan).scansPerMonth;
+  return usedThisMonth < entitlementsFor(plan).pagesPerMonth;
 }
 
 /** A paid plan is anything that isn't free — i.e. backed by a Stripe subscription. */

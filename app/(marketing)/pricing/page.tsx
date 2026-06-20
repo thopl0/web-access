@@ -41,9 +41,9 @@ const TIERS: Tier[] = [
     period: "free forever",
     features: [
       `Scan ${PLANS.free.maxSites} site`,
-      `${PLANS.free.scansPerMonth} scans each month`,
+      `Up to ${PLANS.free.pagesPerMonth} pages a month`,
       "The core automated checks — contrast, labels, alt text, focus, reading order",
-      "Plain-language fixes for every issue we find",
+      "A plain-language explanation of every issue we find, and why it matters",
     ],
   },
   {
@@ -53,7 +53,8 @@ const TIERS: Tier[] = [
     period: "/ mo",
     features: [
       `Up to ${PLANS.pro.maxSites} sites`,
-      `${PLANS.pro.scansPerMonth.toLocaleString("en-US")} scans each month`,
+      `Up to ${PLANS.pro.pagesPerMonth.toLocaleString("en-US")} pages a month`,
+      "The fixes: a paste-ready before→after for every issue, plus a copy-paste prompt for your AI builder",
       "AI judgment on the fuzzy stuff, like whether your alt text actually says something",
       "Scheduled monitoring — re-scan on a timer and when a page changes",
       "Downloadable artifacts: accessibility certificate, statement, and VPAT",
@@ -67,9 +68,9 @@ const TIERS: Tier[] = [
     period: "/ mo",
     features: [
       `Up to ${PLANS.business.maxSites} sites`,
-      `${PLANS.business.scansPerMonth.toLocaleString("en-US")} scans each month`,
+      `Up to ${PLANS.business.pagesPerMonth.toLocaleString("en-US")} pages a month`,
       `Team seats for up to ${PLANS.business.teamSeats} people`,
-      "Everything in Pro — AI judgment, monitoring, artifacts, runtime fixes",
+      "Everything in Pro — the fixes, AI judgment, monitoring, artifacts, runtime fixes",
       "Priority support from a real person",
     ],
   },
@@ -224,11 +225,12 @@ export default async function PricingPage() {
         {/* Honest reassurance about the free tier. */}
         <Reveal direction="up" className="mt-10">
           <p className="max-w-3xl text-lg text-on-accent/90">
-            The free plan isn&apos;t a locked-up trial that nags you to pay.
-            It runs the real checks and gives you the real fixes. We build for
-            people who get shut out of the web — gating the basics behind a
-            paywall would miss the whole point. Pay when you need more sites or
-            want the scans to run without you.
+            The free plan isn&apos;t a locked-up trial that nags you to pay. It
+            runs the real checks and tells you exactly what&apos;s wrong and why,
+            in plain language, on up to {PLANS.free.pagesPerMonth} pages a month.
+            We build for people who get shut out of the web, so finding the
+            problems is always free. Upgrade to Pro when you want the fixes
+            handed to you, more pages, or scans that run on their own.
           </p>
         </Reveal>
       </Section>
@@ -270,18 +272,19 @@ export default async function PricingPage() {
 
             <FaqItem question="What&apos;s actually in the free plan?">
               <p>
-                One site, {PLANS.free.scansPerMonth} scans a month, and the core
-                automated checks — contrast, missing labels, weak alt text,
-                focus you can&apos;t see, reading order. Every issue comes with
-                the same plain-language fix the paid plans get. It&apos;s a real
-                tool, not a teaser.
+                One site, up to {PLANS.free.pagesPerMonth} pages a month, and the
+                core automated checks — contrast, missing labels, weak alt text,
+                focus you can&apos;t see, reading order. For every issue you get a
+                plain-language explanation of what&apos;s wrong and why it
+                matters. The concrete before→after fixes are a Pro feature — free
+                finds the problems, Pro hands you the fixes.
               </p>
             </FaqItem>
 
             <FaqItem question="Do you store my site&apos;s data?">
               <p>
-                We keep the results — the list of issues and the fixes — so you
-                can come back to them. The raw render we load to test your page
+                We keep the results — the list of issues, and the fixes on Pro —
+                so you can come back to them. The raw render we load to test your page
                 is discarded once the scan finishes. We don&apos;t hang on to a
                 copy of your site.
               </p>
@@ -289,11 +292,13 @@ export default async function PricingPage() {
 
             <FaqItem question="What do Pro and Business add?">
               <p>
-                More sites and a much bigger scan budget, plus the parts that run
-                without you: AI judgment on fuzzy things like alt-text quality,
-                scheduled monitoring, downloadable artifacts (certificate,
-                statement, VPAT), and live runtime fixes. Business adds team
-                seats and priority support on top.
+                More sites and a much bigger page budget, plus the actual fixes:
+                a paste-ready before→after for every issue and a copy-paste prompt
+                for your AI builder. Then the parts that run without you — AI
+                judgment on fuzzy things like alt-text quality, scheduled
+                monitoring, downloadable artifacts (certificate, statement, VPAT),
+                and live runtime fixes. Business adds team seats and priority
+                support on top.
               </p>
             </FaqItem>
 

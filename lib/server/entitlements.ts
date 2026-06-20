@@ -23,7 +23,7 @@ export {
   PLANS,
   entitlementsFor,
   canAddSite,
-  withinScanQuota,
+  withinPageQuota,
   isPaidPlan,
   normalizePlan,
 } from "@/lib/entitlements";
@@ -79,11 +79,12 @@ function startOfMonth(now = new Date()): Date {
 }
 
 /**
- * Scans created this calendar month across ALL of the user's sites (the `withinScanQuota` input).
- * Scans aren't FK-linked to users, so we resolve the user's site ids first, then count scans created
- * since the start of the month. Returns 0 when the user owns no sites.
+ * Pages scanned this calendar month across ALL of the user's sites (the `withinPageQuota` input). One
+ * scan row == one page render, so counting scan rows counts pages. Scans aren't FK-linked to users, so
+ * we resolve the user's site ids first, then count scans created since the start of the month. Returns
+ * 0 when the user owns no sites.
  */
-export async function countUserScansThisMonth(userId: string): Promise<number> {
+export async function countUserPagesThisMonth(userId: string): Promise<number> {
   const siteRows = await db
     .select({ id: schema.sites.id })
     .from(schema.sites)
@@ -101,9 +102,9 @@ export async function countUserScansThisMonth(userId: string): Promise<number> {
 }
 
 /**
- * Convenience for the ingest route / manual rescan: resolve a SITE's owner plan + this-month scan
- * usage in one place, so the request seams can call `withinScanQuota(plan, used)`. Returns null when
- * the site is unowned (a system site) — callers treat null as "no quota gate applies".
+ * Convenience for the ingest route / manual rescan: resolve a SITE's owner plan + this-month page
+ * usage in one place, so the request seams can call `withinPageQuota(plan, used)`. Returns null when
+ * the site is unowned (an anonymous trial) — callers treat null as "no quota gate applies".
  */
 export async function ownerScanUsage(
   siteId: string,
@@ -118,7 +119,7 @@ export async function ownerScanUsage(
 
   const [plan, usedThisMonth] = await Promise.all([
     getUserPlan(ownerId),
-    countUserScansThisMonth(ownerId),
+    countUserPagesThisMonth(ownerId),
   ]);
   return { ownerId, plan, usedThisMonth };
 }

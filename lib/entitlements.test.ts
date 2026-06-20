@@ -5,7 +5,7 @@ import {
   normalizePlan,
   entitlementsFor,
   canAddSite,
-  withinScanQuota,
+  withinPageQuota,
   isPaidPlan,
 } from "./entitlements";
 
@@ -33,13 +33,18 @@ describe("entitlementsFor", () => {
   it("free is the most restrictive across every dimension", () => {
     for (const plan of PLAN_ORDER) {
       expect(PLANS[plan].maxSites).toBeGreaterThanOrEqual(PLANS.free.maxSites);
-      expect(PLANS[plan].scansPerMonth).toBeGreaterThanOrEqual(PLANS.free.scansPerMonth);
+      expect(PLANS[plan].pagesPerMonth).toBeGreaterThanOrEqual(PLANS.free.pagesPerMonth);
     }
-    // Feature flags off on free.
+    // Feature flags off on free — including the concrete fixes (diagnosis-only).
+    expect(PLANS.free.fixes).toBe(false);
     expect(PLANS.free.aiJudge).toBe(false);
     expect(PLANS.free.artifacts).toBe(false);
     expect(PLANS.free.monitoring).toBe(false);
     expect(PLANS.free.runtimeRemediation).toBe(false);
+  });
+  it("paid plans grant the concrete fixes", () => {
+    expect(PLANS.pro.fixes).toBe(true);
+    expect(PLANS.business.fixes).toBe(true);
   });
 });
 
@@ -59,16 +64,16 @@ describe("canAddSite", () => {
   });
 });
 
-describe("withinScanQuota", () => {
+describe("withinPageQuota", () => {
   it("is true below the cap and false at/over it", () => {
-    expect(withinScanQuota("free", 0)).toBe(true);
-    expect(withinScanQuota("free", PLANS.free.scansPerMonth - 1)).toBe(true);
-    expect(withinScanQuota("free", PLANS.free.scansPerMonth)).toBe(false);
-    expect(withinScanQuota("free", PLANS.free.scansPerMonth + 5)).toBe(false);
+    expect(withinPageQuota("free", 0)).toBe(true);
+    expect(withinPageQuota("free", PLANS.free.pagesPerMonth - 1)).toBe(true);
+    expect(withinPageQuota("free", PLANS.free.pagesPerMonth)).toBe(false);
+    expect(withinPageQuota("free", PLANS.free.pagesPerMonth + 5)).toBe(false);
   });
   it("pro has a larger monthly budget than free", () => {
-    expect(withinScanQuota("pro", PLANS.free.scansPerMonth)).toBe(true);
-    expect(withinScanQuota("pro", PLANS.pro.scansPerMonth)).toBe(false);
+    expect(withinPageQuota("pro", PLANS.free.pagesPerMonth)).toBe(true);
+    expect(withinPageQuota("pro", PLANS.pro.pagesPerMonth)).toBe(false);
   });
 });
 

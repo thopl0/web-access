@@ -5,6 +5,7 @@ import { db, schema } from "./db";
 import { SEVERITY_RANK, emptyCounts } from "@/lib/severity";
 import type { Severity, SeverityCounts } from "@/lib/severity";
 import { rankByLegalRisk } from "@/lib/legalRisk";
+import { ownerEntitlements } from "./entitlements";
 
 // Re-exported so existing importers of these from report.ts keep working; the
 // definitions now live in the client-safe lib/severity.ts.
@@ -234,6 +235,12 @@ export type SitePages = {
   siteId: string;
   pages: PageReport[];
   counts: SeverityCounts;
+  /**
+   * True when this site's owner isn't entitled to the concrete fixes, so the `fix` on each element was
+   * withheld (diagnosis-only Free tier). Lets the UI show an "upgrade for the fixes" nudge in place of
+   * the missing before→after. Always false on evidence-free queries (which never load fixes anyway).
+   */
+  fixesLocked: boolean;
 };
 
 /** Strip the origin so a page path reads clearly (keep query). Falls back to the raw url. */
@@ -345,6 +352,11 @@ export async function getSitePages(
   // The intelligent-report summary is its own (heavier) join — opt-in, default OFF — so only the page
   // that renders the "Start here" card pays for it; list/summary callers never load it.
   const withSummary = opts.summary ?? false;
+  // Concrete fixes are a paid feature (Free is diagnosis-only). Resolve the owner's entitlement once,
+  // only on evidence views (the only ones that load fixes); when they're not entitled we skip the fix
+  // join entirely and flag `fixesLocked` so the UI can upsell. Anonymous/unowned trial sites resolve
+  // to Free, so a public scan never shows fixes — the scan page teases them as a Pro upsell instead.
+  const fixesAllowed = withEvidence ? (await ownerEntitlements(siteId)).fixes : false;
   // Image URLs are access-controlled; on a public share view we carry the site's share token so the
   // image routes authorize the anonymous viewer. Authed (owner) views pass no token.
   const tokenQuery = opts.shareToken ? `?token=${encodeURIComponent(opts.shareToken)}` : "";
@@ -434,7 +446,7 @@ export async function getSitePages(
   // Concrete before→after fixes for those findings (separate table, opt-in with evidence — same as
   // explanations; the list/summary view skips this join). Attached to the element as `fix`.
   const fixRows =
-    withEvidence && findingIds.length
+    withEvidence && fixesAllowed && findingIds.length
       ? await db
           .select()
           .from(schema.fixSuggestions)
@@ -594,7 +606,7 @@ export async function getSitePages(
       b.counts.total - a.counts.total,
   );
 
-  return { siteId, pages, counts: siteCounts };
+  return { siteId, pages, counts: siteCounts, fixesLocked: withEvidence && !fixesAllowed };
 }
 
 /** The site-level "Start here" content for the report header: a plain-English summary plus the
