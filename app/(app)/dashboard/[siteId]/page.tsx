@@ -5,6 +5,7 @@ import { CircleCheck, ExternalLink, FileSearch, ShieldCheck } from "lucide-react
 
 import { SiteReport } from "@/components/dashboard/SiteReport";
 import { StartHere } from "@/components/dashboard/StartHere";
+import { ChangesSinceLastScan } from "@/components/dashboard/ChangesSinceLastScan";
 import { SiteStatusChip } from "@/components/dashboard/SiteStatusChip";
 import { InstallInstructions } from "@/components/dashboard/InstallInstructions";
 import { VerifyPanel } from "@/components/dashboard/VerifyPanel";
@@ -18,6 +19,7 @@ import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
 import { getIssuesTrend, getSitePages, pathOf, rollupByRule, siteStartHere } from "@/lib/server/report";
+import { getScanDelta } from "@/lib/server/verification";
 import { explainRule } from "@/lib/explain";
 import { SEVERITY_RANK, type Severity } from "@/lib/severity";
 import { summarizeConformance } from "@/lib/wcag";
@@ -52,6 +54,10 @@ export default async function SiteReportsPage({
   const hasPages = pages.length > 0;
   const conformance = summarizeConformance(rules, { evaluated: hasPages });
   const snippet = embedSnippet(await appOrigin(), site.id);
+
+  // Verification loop (plan §8.5): compare the latest re-scan against the previous one so the report
+  // can CONFIRM which fixes actually worked. Only meaningful once there are scans to compare.
+  const scanDelta = hasPages ? await getScanDelta(siteId) : null;
 
   const trendData = hasPages
     ? await getIssuesTrend([siteId], 14)
@@ -168,6 +174,14 @@ export default async function SiteReportsPage({
           {startHere ? (
             <div className="mt-8">
               <StartHere startHere={startHere} />
+            </div>
+          ) : null}
+
+          {/* Verification loop: what the latest re-scan CONFIRMS was fixed (and what's newly
+              introduced). Self-suppresses on a first scan or when nothing changed. */}
+          {scanDelta?.hasPrevious && (scanDelta.resolved.length > 0 || scanDelta.introduced.length > 0) ? (
+            <div className={startHere ? "mt-6" : "mt-8"}>
+              <ChangesSinceLastScan delta={scanDelta} />
             </div>
           ) : null}
 
