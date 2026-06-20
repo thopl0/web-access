@@ -1,10 +1,10 @@
 /**
  * Single source of truth for product name + site metadata.
  *
- * `SITE_NAME` is a PLACEHOLDER ("Inclusio"). To rebrand, change it here and
- * nowhere else — every page, the nav, the footer, and <title> read from this.
+ * To rebrand, change `SITE_NAME` here and nowhere else — every page, the nav,
+ * the footer, and <title> read from this.
  */
-export const SITE_NAME = "Inclusio";
+export const SITE_NAME = "webaccessibilitychecker.org";
 
 export const SITE_TAGLINE = "See your site the way real people actually use it.";
 
