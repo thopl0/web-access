@@ -51,7 +51,9 @@ export function StartHere({ startHere }: { startHere: SiteStartHere }) {
   // legal-risk shortlist below stays the focus instead of a wall of prose. Short summaries skip the
   // toggle entirely (the threshold is a cheap length heuristic — no layout measurement needed).
   const [expanded, setExpanded] = useState(false);
-  const isLong = plainSummary.length > 220;
+  // The summary largely restates the ranked list below it, so default to a single line behind a
+  // "Show more" toggle — the actionable shortlist stays the focus instead of a paragraph of prose.
+  const isLong = plainSummary.length > 90;
 
   // Honest provenance, in words: AI-warmed prose vs a deterministic ranking. Never overstated.
   const provenance =
@@ -85,7 +87,7 @@ export function StartHere({ startHere }: { startHere: SiteStartHere }) {
       <p
         className={[
           "mt-4 max-w-2xl text-fg leading-relaxed",
-          isLong && !expanded ? "line-clamp-3" : "",
+          isLong && !expanded ? "line-clamp-1" : "",
         ].join(" ")}
       >
         {plainSummary}

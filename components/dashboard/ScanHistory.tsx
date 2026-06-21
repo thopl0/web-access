@@ -188,6 +188,50 @@ function ChangeRuleList({
   );
 }
 
+/* How many page paths to list inline before collapsing to "…and N more". */
+const PAGE_LIST_CAP = 20;
+
+/**
+ * Which pages a scan covered — a compact native <details> (keyboard-accessible, no client JS). The
+ * summary states "N pages scanned"; expanding reveals the page paths (font-mono, muted, mirroring the
+ * AffectedPages list). The "…and N more" tail uses the true `pageCount`, which may exceed the carried
+ * `pages` list for large crawls. A single-page spot check just shows the one path inline — no disclosure.
+ */
+function ScannedPages({ pages, pageCount }: { pages: string[]; pageCount: number }) {
+  if (pages.length === 0) return null;
+
+  if (pageCount === 1) {
+    return (
+      <p className="break-all font-mono text-xs text-fg-soft">{pages[0]}</p>
+    );
+  }
+
+  const shown = pages.slice(0, PAGE_LIST_CAP);
+  const overflow = pageCount - shown.length;
+  return (
+    <details className="group min-w-0">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-fg-soft marker:content-none">
+        {pageCount} pages scanned
+        <span className="text-fg-soft transition-transform group-open:rotate-180" aria-hidden>
+          ▾
+        </span>
+      </summary>
+      <ul className="mt-2 flex flex-col gap-1">
+        {shown.map((p) => (
+          <li key={p} className="break-all font-mono text-sm text-fg-soft">
+            {p}
+          </li>
+        ))}
+        {overflow > 0 ? (
+          <li className="text-xs text-fg-soft">
+            …and {overflow} more {overflow === 1 ? "page" : "pages"}.
+          </li>
+        ) : null}
+      </ul>
+    </details>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Timeline — distinct vertical-rail layout (ordered list, newest first).
  * ------------------------------------------------------------------ */
@@ -268,6 +312,13 @@ export function ScanTimelineList({
               <div className="mt-2">
                 <SeverityBar counts={snap.counts} muted={snap.status !== "complete"} />
               </div>
+
+              {/* Which pages this scan covered. */}
+              {snap.pages.length > 0 ? (
+                <div className="mt-4 border-t border-[var(--color-panel-line)] pt-3">
+                  <ScannedPages pages={snap.pages} pageCount={snap.pageCount} />
+                </div>
+              ) : null}
 
               {/* What changed vs the previous comparable (same-scope) scan. */}
               <div className="mt-4 border-t border-[var(--color-panel-line)] pt-3">

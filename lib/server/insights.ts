@@ -9,6 +9,7 @@ import {
 } from "@/lib/severity";
 import { healthScore } from "@/lib/score";
 import { explainRule } from "@/lib/explain";
+import { pathOf } from "./report";
 import type { ScanStatus } from "@web-access/shared";
 
 /**
@@ -30,6 +31,12 @@ export type ScanSnapshot = {
   createdAt: string; // ISO
   status: ScanStatus;
   pageCount: number;
+  /**
+   * Paths of the pages this snapshot scanned (origin stripped, sorted, capped). `pageCount` is the
+   * true total; this list may be shorter for big crawls. Carried out so the timeline can show which
+   * pages a scan covered.
+   */
+  pages: string[];
   counts: SeverityCounts;
   /** 0–100 health score (same scale as the dashboard score badge). */
   score: number;
@@ -119,6 +126,9 @@ function countsFromRules(rules: Map<string, RuleStat>): SeverityCounts {
 
 type ScanRow = typeof schema.scans.$inferSelect;
 
+/** Cap on the scanned-page paths carried per snapshot; `pageCount` still holds the true total. */
+const PAGE_LIST_CAP = 50;
+
 async function realSnapshots(siteId: string): Promise<SnapshotDetail[]> {
   const scans = await db
     .select()
@@ -188,6 +198,7 @@ async function realSnapshots(siteId: string): Promise<SnapshotDetail[]> {
 
     const counts = countsFromRules(rules);
     const pageCount = urls.size;
+    const pages = [...urls].map(pathOf).sort((a, b) => a.localeCompare(b)).slice(0, PAGE_LIST_CAP);
     const status: ScanStatus = anyError
       ? "error"
       : anyRunning
@@ -200,6 +211,7 @@ async function realSnapshots(siteId: string): Promise<SnapshotDetail[]> {
         createdAt: (newest.completedAt ?? newest.createdAt).toISOString(),
         status,
         pageCount,
+        pages,
         counts,
         score: healthScore(counts, pageCount),
         isCrawl: isCrawlRelease(releaseId),
