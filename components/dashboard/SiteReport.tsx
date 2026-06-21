@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, ChevronDown } from "lucide-react";
 
 import { Panel } from "@/components/dashboard/ui";
 import { SeverityBadge, SeverityDot, StatusChip } from "@/components/dashboard/severity";
@@ -23,6 +24,23 @@ function Caret() {
       aria-hidden
       strokeWidth={2.5}
     />
+  );
+}
+
+/**
+ * Link from a rolled-up rule into its full issue-detail page (where the fix + apply control live).
+ * The key format matches SiteBoard.tsx (`${siteId}:${ruleId}`); `?from` lets the detail page send
+ * the Back link to the right per-site list. Rendered only on the authenticated dashboard (siteId set).
+ */
+function OpenDetailsLink({ siteId, ruleId }: { siteId: string; ruleId: string }) {
+  return (
+    <Link
+      href={`/dashboard/issues/${encodeURIComponent(`${siteId}:${ruleId}`)}?from=${encodeURIComponent(siteId)}`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-blue/50 bg-blue/5 px-3 py-1.5 text-sm font-bold text-blue no-underline transition-colors hover:bg-blue/10"
+    >
+      Open details &amp; fix
+      <ArrowRight className="size-4" aria-hidden strokeWidth={2.5} />
+    </Link>
   );
 }
 
@@ -88,10 +106,13 @@ function RuleCard({
   rule,
   open,
   onToggle,
+  siteId,
 }: {
   rule: RuleRollup;
   open: boolean;
   onToggle: (open: boolean) => void;
+  /** When present (authenticated dashboard), show the "Open details & fix" link. */
+  siteId?: string;
 }) {
   const title = ruleTitle(rule.ruleId, rule.message);
   return (
@@ -114,6 +135,12 @@ function RuleCard({
             wcag={rule.wcag}
             helpUrl={rule.helpUrl}
           />
+
+          {siteId ? (
+            <div className="mt-4">
+              <OpenDetailsLink siteId={siteId} ruleId={rule.ruleId} />
+            </div>
+          ) : null}
 
           <p className="mt-5 text-xs font-bold uppercase tracking-wide text-fg-soft">
             Where it appears
@@ -168,11 +195,14 @@ function PageRow({
   filter,
   open,
   onToggle,
+  siteId,
 }: {
   page: PageReport;
   filter: Filter;
   open: boolean;
   onToggle: (open: boolean) => void;
+  /** When present (authenticated dashboard), show the "Open details & fix" link per rule. */
+  siteId?: string;
 }) {
   const groups =
     filter === "all" ? page.groups : page.groups.filter((g) => g.impact === filter);
@@ -229,6 +259,11 @@ function PageRow({
                         wcag={g.wcag}
                         helpUrl={g.helpUrl}
                       />
+                      {siteId ? (
+                        <div className="mt-4">
+                          <OpenDetailsLink siteId={siteId} ruleId={g.ruleId} />
+                        </div>
+                      ) : null}
                       <p className="mt-4 text-xs font-bold uppercase tracking-wide text-fg-soft">
                         Where it is on this page
                       </p>
@@ -261,10 +296,14 @@ export function SiteReport({
   rules,
   pages,
   counts,
+  siteId,
 }: {
   rules: RuleRollup[];
   pages: PageReport[];
   counts: SeverityCounts;
+  /** Authenticated dashboard only — enables the "Open details & fix" links into the issue-detail flow.
+   *  Omitted on public share/scan pages, which don't link into the owner's dashboard. */
+  siteId?: string;
 }) {
   const [view, setView] = useState<View>("issue");
   const [filter, setFilter] = useState<Filter>("all");
@@ -364,6 +403,7 @@ export function SiteReport({
               rule={rule}
               open={open.has(rule.ruleId)}
               onToggle={(o) => setKeyOpen(rule.ruleId, o)}
+              siteId={siteId}
             />
           ))}
         </ul>
@@ -376,6 +416,7 @@ export function SiteReport({
               filter={filter}
               open={open.has(page.url)}
               onToggle={(o) => setKeyOpen(page.url, o)}
+              siteId={siteId}
             />
           ))}
         </ul>

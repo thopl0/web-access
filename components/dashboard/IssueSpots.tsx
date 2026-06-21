@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { Button } from "@/components/ui/Button";
-import { approveRemediation } from "@/app/actions/remediation";
+import { approveRemediation, setRuntimeRemediation } from "@/app/actions/remediation";
 
 /**
  * Serializable description of one offending element instance. The page builds
@@ -133,11 +133,14 @@ function ApplyPatch({
   selector,
   patch,
   needsReview,
+  runtimeEnabled,
 }: {
   siteId: string;
   selector: string;
   patch: { attr: string; value: string };
   needsReview: boolean;
+  /** When false, applying first turns on the site's runtime-remediation master toggle (Pro-gated). */
+  runtimeEnabled: boolean;
 }) {
   const inputId = useId();
   const [pending, startTransition] = useTransition();
@@ -152,6 +155,15 @@ function ApplyPatch({
   const apply = () => {
     setError(null);
     startTransition(async () => {
+      // First live fix on a site with the master toggle off: enable runtime remediation, then approve.
+      // Both are Pro-gated server-side, so this stays one-click for Pro and blocked for everyone else.
+      if (!runtimeEnabled) {
+        const on = await setRuntimeRemediation(siteId, true);
+        if (!on.ok) {
+          setError(on.error ?? "Couldn't enable live fixes.");
+          return;
+        }
+      }
       const res = await approveRemediation(siteId, { selector, attr: patch.attr, value });
       if (res.ok) {
         setApplied(true);
@@ -161,6 +173,9 @@ function ApplyPatch({
     });
   };
 
+  // Label nudges that the first apply also flips on live fixes for the whole site.
+  const applyLabel = runtimeEnabled ? "Apply as live fix" : "Enable live fixes & apply";
+
   return (
     <div className="mt-3 rounded-lg border border-green/30 bg-green/5 p-3">
       <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-green">
@@ -169,6 +184,7 @@ function ApplyPatch({
       </p>
       <p className="mt-1 text-xs text-fg-soft">
         Applies instantly on your live site as a temporary patch — the real fix is to change your source.
+        {runtimeEnabled ? null : " Applying turns on live fixes for this site."}
       </p>
 
       {placeholder ? (
@@ -202,7 +218,7 @@ function ApplyPatch({
         ) : (
           <Button type="button" variant="green" size="sm" onClick={apply} disabled={pending}>
             {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-            {pending ? "Applying…" : "Apply as live fix"}
+            {pending ? "Applying…" : applyLabel}
           </Button>
         )}
       </div>
@@ -216,9 +232,25 @@ function ApplyPatch({
   );
 }
 
+/** No concrete fix could be generated for this spot — point to the AI builder prompt instead. */
+function NoFixHint({ siteId }: { siteId: string }) {
+  return (
+    <p className="mt-3 text-xs text-fg-soft">
+      No auto-fix for this one — use the{" "}
+      <Link
+        href={`/dashboard/${siteId}/reports`}
+        className="font-bold text-link underline underline-offset-2"
+      >
+        AI builder prompt
+      </Link>{" "}
+      to resolve it in your source.
+    </p>
+  );
+}
+
 /** Concrete before→after code fix for one element: two code blocks, a copy button for the
  *  corrected markup, and a "needs review" badge for AI-generated or otherwise unverified fixes. */
-function FixBlock({
+export function FixBlock({
   fix,
   selector,
   siteId,
@@ -229,6 +261,7 @@ function FixBlock({
   siteId: string;
   runtimeEnabled: boolean;
 }) {
+  const canApply = Boolean(fix.attributePatch && fix.attributePatch.length > 0);
   // AI fixes are judgment calls; needsReview covers those plus deterministic placeholder inserts.
   const review = fix.kind === "ai" || fix.needsReview;
   return (
@@ -267,30 +300,33 @@ function FixBlock({
         />
       </div>
 
-      {/* Phase C: apply safe attribute patches live, gated on the site's runtime toggle. */}
-      {fix.attributePatch && fix.attributePatch.length > 0 ? (
-        runtimeEnabled ? (
-          fix.attributePatch.map((patch, i) => (
-            <ApplyPatch
-              key={`${patch.attr}-${i}`}
-              siteId={siteId}
-              selector={selector}
-              patch={patch}
-              needsReview={review}
-            />
-          ))
-        ) : (
-          <p className="mt-3 text-xs text-fg-soft">
-            <Link
-              href={`/dashboard/${siteId}/settings`}
-              className="font-bold text-link underline underline-offset-2"
-            >
-              Turn on Runtime fixes in Settings
-            </Link>{" "}
-            to apply this instantly.
-          </p>
-        )
-      ) : null}
+      {/* Phase C: apply safe attribute patches live. When runtime is off, the apply control enables it
+          first (Pro-gated) so the first live fix is one click — no detour to Settings. */}
+      {canApply ? (
+        fix.attributePatch!.map((patch, i) => (
+          <ApplyPatch
+            key={`${patch.attr}-${i}`}
+            siteId={siteId}
+            selector={selector}
+            patch={patch}
+            needsReview={review}
+            runtimeEnabled={runtimeEnabled}
+          />
+        ))
+      ) : (
+        // No safe attribute patch (e.g. color-contrast, heading-order): can't be applied live.
+        <p className="mt-3 text-xs text-fg-soft">
+          This fix can&apos;t be auto-applied to your live site — apply it in your source (copy above), or
+          use the{" "}
+          <Link
+            href={`/dashboard/${siteId}/reports`}
+            className="font-bold text-link underline underline-offset-2"
+          >
+            AI builder prompt
+          </Link>
+          .
+        </p>
+      )}
     </div>
   );
 }
@@ -348,7 +384,9 @@ function PatternCard({
 
       {ex.fix ? (
         <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
-      ) : null}
+      ) : (
+        <NoFixHint siteId={siteId} />
+      )}
 
       <PageList paths={pattern.pagePaths} extra={pattern.extraPages} />
 
@@ -397,7 +435,9 @@ function PageCard({
             {el.explanation ? <AiExplanation explanation={el.explanation} /> : null}
             {el.fix ? (
               <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
-            ) : null}
+            ) : (
+              <NoFixHint siteId={siteId} />
+            )}
             <ShowCode selector={el.selector} snippet={el.htmlSnippet} idBase={`${idBase}-${i}`} />
           </li>
         ))}

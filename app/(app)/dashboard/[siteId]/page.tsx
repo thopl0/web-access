@@ -263,7 +263,7 @@ export default async function SiteReportsPage({
                 </div>
               </Panel>
             ) : null}
-            <SiteReport rules={rules} pages={pages} counts={counts} />
+            <SiteReport rules={rules} pages={pages} counts={counts} siteId={siteId} />
           </Section>
         </>
       )}

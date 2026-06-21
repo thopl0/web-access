@@ -11,7 +11,7 @@ import { IssueActions } from "@/components/dashboard/IssueActions";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
-import { IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
+import { FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
 import { eq } from "drizzle-orm";
 
 import { verifySession } from "@/lib/server/dal";
@@ -66,12 +66,23 @@ function pathOfUrl(u: string): string {
   }
 }
 
+/** Validate an optional `?from=<siteId>` so a malformed param can never bend the Back link off-site. */
+function parseFrom(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return null;
+  // Site ids are short opaque tokens; accept only plausible ones and never anything path-shaped.
+  return /^[A-Za-z0-9_-]{1,64}$/.test(raw) ? raw : null;
+}
+
 export default async function IssueDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ key: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { key } = await params;
+  const { from } = await searchParams;
   const { userId } = await verifySession();
 
   const issue = await getIssueDetail(userId, decodeURIComponent(key));
@@ -88,6 +99,13 @@ export default async function IssueDetailPage({
       .limit(1)
   )[0];
   const runtimeEnabled = Boolean(siteRow?.rr);
+
+  // Back link: when arriving from a per-site issues list (and the id matches this issue's site),
+  // return there; otherwise fall back to the global inbox.
+  const fromSite = parseFrom(from);
+  const backToSite = fromSite && fromSite === issue.siteId;
+  const backHref = backToSite ? `/dashboard/${issue.siteId}/issues` : "/dashboard/issues";
+  const backLabel = backToSite ? `Back to ${issue.siteName} issues` : "Back to issues";
 
   // Flatten every offending element across pages, carrying its page's shot.
   const instances: Instance[] = issue.pages.flatMap((p: RulePage) =>
@@ -167,7 +185,7 @@ export default async function IssueDetailPage({
 
   return (
     <PageShell>
-      <BackLink href="/dashboard/issues">Back to issues</BackLink>
+      <BackLink href={backHref}>{backLabel}</BackLink>
 
       <PageHeader
         className="mt-4"
@@ -266,6 +284,17 @@ export default async function IssueDetailPage({
                     {heroSpot.explanation.fix}
                   </p>
                 </div>
+              ) : null}
+
+              {/* Primary action above the fold: the concrete fix + apply control for the lead spot,
+                  reusing the same FixBlock the per-spot cards render below. */}
+              {heroSpot?.fix ? (
+                <FixBlock
+                  fix={heroSpot.fix}
+                  selector={heroSpot.selector}
+                  siteId={issue.siteId}
+                  runtimeEnabled={runtimeEnabled}
+                />
               ) : null}
 
               <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-panel-line)] pt-4">

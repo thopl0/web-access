@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { desc, eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { Inbox } from "lucide-react";
 
-import { EmptyState, PageHeader } from "@/components/dashboard/ui";
+import { CodeChip, EmptyState, PageHeader } from "@/components/dashboard/ui";
 import { PageShell, MetricStrip, type Metric } from "@/components/dashboard/layout";
-import { IssueFilters } from "@/components/dashboard/IssueFilters";
+import { SiteStatusChip } from "@/components/dashboard/SiteStatusChip";
 import { IssueList } from "@/components/dashboard/IssueList";
 import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
@@ -14,31 +15,33 @@ import { SEVERITY_ORDER, type Severity } from "@/lib/severity";
 export const metadata: Metadata = { title: "Issues" };
 export const dynamic = "force-dynamic";
 
-export default async function IssuesPage({
+export default async function SiteIssuesPage({
+  params,
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; severity?: string; site?: string }>;
+  params: Promise<{ siteId: string }>;
+  searchParams: Promise<{ view?: string; severity?: string }>;
 }) {
+  const { siteId } = await params;
   const { userId } = await verifySession();
-  const sp = await searchParams;
 
+  // Ownership check — never trust the URL param. Unowned/other users' sites 404.
+  const owned = await db
+    .select()
+    .from(schema.sites)
+    .where(and(eq(schema.sites.id, siteId), eq(schema.sites.ownerId, userId)))
+    .limit(1);
+  const site = owned[0];
+  if (!site) notFound();
+
+  const sp = await searchParams;
   const view = sp.view === "muted" || sp.view === "all" ? sp.view : "open";
   const severity =
     sp.severity && (SEVERITY_ORDER as readonly string[]).includes(sp.severity)
       ? (sp.severity as Severity)
       : undefined;
-  const siteId = sp.site || undefined;
 
-  const [issues, sites] = await Promise.all([
-    getUserIssues(userId, { view, severity, siteId }),
-    db
-      .select({ id: schema.sites.id, name: schema.sites.name })
-      .from(schema.sites)
-      .where(eq(schema.sites.ownerId, userId))
-      .orderBy(desc(schema.sites.createdAt)),
-  ]);
-
-  const hasSites = sites.length > 0;
+  const issues = await getUserIssues(userId, { view, severity, siteId });
 
   // Summary derived from the rows currently in view — one calm scorecard band.
   const open = issues.filter((i) => i.status === "open").length;
@@ -56,46 +59,36 @@ export default async function IssuesPage({
       <PageHeader
         titleId="issues-title"
         eyebrow="Inbox"
-        title="Issues"
-        lead="Every accessibility issue across your sites, worst first. Resolve, ignore, or open one for the fix."
+        title={site.name}
+        lead={
+          <span className="inline-flex flex-wrap items-center gap-3">
+            <SiteStatusChip status={site.status} />
+            <span className="inline-flex items-center gap-1.5 text-fg-soft">
+              Site ID <CodeChip>{site.id}</CodeChip>
+            </span>
+          </span>
+        }
       />
 
-      {!hasSites ? (
+      {issues.length === 0 ? (
         <EmptyState
           className="mt-8"
           icon={<Inbox className="size-6" aria-hidden strokeWidth={2} />}
-          title="No sites yet"
+          title={view === "open" ? "Inbox zero 🎉" : "Nothing here"}
         >
-          Add a site and once it&apos;s scanned, its issues collect here.
+          {view === "open"
+            ? "No open issues for this site. Nice."
+            : "No issues match this view."}
         </EmptyState>
       ) : (
         <>
-          {/* One quiet control row for all filters. */}
+          {/* Slim scorecard reflecting this site's set. */}
           <div className="mt-6">
-            <IssueFilters sites={sites} />
+            <MetricStrip items={metrics} />
           </div>
 
-          {issues.length === 0 ? (
-            <EmptyState
-              className="mt-8"
-              icon={<Inbox className="size-6" aria-hidden strokeWidth={2} />}
-              title={view === "open" ? "Inbox zero 🎉" : "Nothing here"}
-            >
-              {view === "open"
-                ? "No open issues match these filters. Nice."
-                : "No issues match these filters."}
-            </EmptyState>
-          ) : (
-            <>
-              {/* Slim scorecard reflecting the filtered set. */}
-              <div className="mt-6">
-                <MetricStrip items={metrics} />
-              </div>
-
-              {/* The inbox: one calm table, hairline-separated rows. */}
-              <IssueList issues={issues} className="mt-8" />
-            </>
-          )}
+          {/* The inbox: one calm table, hairline-separated rows. */}
+          <IssueList issues={issues} className="mt-8" fromSiteId={siteId} />
         </>
       )}
     </PageShell>

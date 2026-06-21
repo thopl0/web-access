@@ -27,6 +27,7 @@ type SiteNav = { id: string; name: string; critical: number };
 function sectionsFor(id: string) {
   return [
     { href: `/dashboard/${id}`, label: "Overview", exact: true },
+    { href: `/dashboard/${id}/issues`, label: "Issues" },
     { href: `/dashboard/${id}/pages`, label: "Pages" },
     { href: `/dashboard/${id}/history`, label: "History" },
     { href: `/dashboard/${id}/conformance`, label: "Conformance" },

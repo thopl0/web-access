@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Loader2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -76,9 +77,29 @@ export function RuntimeFixSettings({
       <div className="flex flex-col gap-3 border-t border-[var(--color-panel-line)] pt-5">
         <h3 className="font-display font-bold text-fg">Approved fixes</h3>
         {list.length === 0 ? (
-          <p className="text-sm text-fg-soft">
-            No fixes approved yet. Approve a fix from any issue&apos;s detail page to add it here.
-          </p>
+          enabled ? (
+            <p className="text-sm text-fg-soft">
+              Live fixes are on —{" "}
+              <Link
+                href={`/dashboard/${siteId}/issues`}
+                className="font-bold text-link underline underline-offset-2"
+              >
+                approve a fix from your issues
+              </Link>{" "}
+              to apply it.
+            </p>
+          ) : (
+            <p className="text-sm text-fg-soft">
+              No fixes approved yet.{" "}
+              <Link
+                href={`/dashboard/${siteId}/issues`}
+                className="font-bold text-link underline underline-offset-2"
+              >
+                Approve a fix from any issue&apos;s detail page
+              </Link>{" "}
+              to add it here.
+            </p>
+          )
         ) : (
           <>
             {!enabled ? (
