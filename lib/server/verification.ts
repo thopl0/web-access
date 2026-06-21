@@ -4,6 +4,7 @@ import type { Finding, Impact } from "@web-access/shared";
 import { db, schema } from "./db";
 import {
   getSitePages,
+  pathOf,
   rollupByRule,
   type IssueElement,
   type IssueGroup,
@@ -40,6 +41,14 @@ export interface RuleSnapshot {
   pageCount: number;
 }
 
+/** One affected page for a rule delta — the path and how many spots the rule had there. */
+export interface RuleDeltaPage {
+  /** The page path (origin stripped via pathOf), e.g. "/checkout". */
+  path: string;
+  /** Offending elements for this rule on this page. */
+  spots: number;
+}
+
 /** One rule that changed between scans, carried to the UI with verification context. */
 export interface RuleDelta {
   ruleId: string;
@@ -48,11 +57,20 @@ export interface RuleDelta {
   wcag: string[];
   spots: number;
   pageCount: number;
+  /**
+   * The affected pages, worst-first by spots — for an introduced rule, the current pages where it now
+   * appears; for a resolved rule, the previous pages where it used to appear (so "which pages it cleared
+   * from"). Capped at {@link RULE_DELTA_PAGE_CAP}; rely on `pageCount` for the true total.
+   */
+  pages: RuleDeltaPage[];
   /** The previous scan had a stored before→after fix for this rule (so we can say "the fix worked"). */
   hadSuggestedFix: boolean;
   /** The owner had explicitly resolved/ignored this issue (the strongest "verified fixed" signal). */
   ownerMarkedResolved: boolean;
 }
+
+/** Cap on the per-rule affected-pages list carried to the UI (the total still lives in `pageCount`). */
+const RULE_DELTA_PAGE_CAP = 20;
 
 /** The verification delta between the previous and the current site-wide scan state. */
 export interface ScanDelta {
@@ -105,6 +123,29 @@ export function diffRuleSnapshots(
 /** Order the same way the report does: worst severity first, then most spots. */
 function severityRank(impact: Impact): number {
   return impact ? SEVERITY_RANK[impact as Severity] : 99;
+}
+
+/**
+ * Build, in one pass over the already-loaded pages, a per-rule list of the pages where that rule appears
+ * (with the rule's spot count on each). Returned lists are sorted worst-first by spots and capped at
+ * {@link RULE_DELTA_PAGE_CAP}; the true page total stays on the snapshot's `pageCount`. No DB access.
+ */
+function pagesByRule(pages: PageReport[]): Map<string, RuleDeltaPage[]> {
+  const byRule = new Map<string, RuleDeltaPage[]>();
+  for (const page of pages) {
+    const path = pathOf(page.url);
+    for (const g of page.groups) {
+      const entry: RuleDeltaPage = { path, spots: g.elements.length };
+      const list = byRule.get(g.ruleId);
+      if (list) list.push(entry);
+      else byRule.set(g.ruleId, [entry]);
+    }
+  }
+  for (const [ruleId, list] of byRule) {
+    list.sort((a, b) => b.spots - a.spots);
+    if (list.length > RULE_DELTA_PAGE_CAP) byRule.set(ruleId, list.slice(0, RULE_DELTA_PAGE_CAP));
+  }
+  return byRule;
 }
 
 /** A RuleRollup → comparable snapshot entry. */
@@ -272,24 +313,42 @@ export async function getScanDelta(siteId: string): Promise<ScanDelta> {
     ownerResolvedRules(siteId, resolvedRuleIds),
   ]);
 
-  const toDelta = (s: RuleSnapshot, hadSuggestedFix: boolean, ownerMarkedResolved: boolean): RuleDelta => ({
+  // Per-rule affected pages, built once per page array. Introduced rules show the CURRENT pages they
+  // now appear on; resolved rules show the PREVIOUS pages they've since cleared from.
+  const currentPagesByRule = pagesByRule(currentPages);
+  const previousPagesByRule = pagesByRule(previousPages);
+
+  const toDelta = (
+    s: RuleSnapshot,
+    pages: RuleDeltaPage[],
+    hadSuggestedFix: boolean,
+    ownerMarkedResolved: boolean,
+  ): RuleDelta => ({
     ruleId: s.ruleId,
     message: s.message,
     impact: s.impact,
     wcag: s.wcag,
     spots: s.spots,
     pageCount: s.pageCount,
+    pages,
     hadSuggestedFix,
     ownerMarkedResolved,
   });
 
   const resolvedDeltas = resolved
-    .map((s) => toDelta(s, withFix.has(s.ruleId), ownerResolved.has(s.ruleId)))
+    .map((s) =>
+      toDelta(
+        s,
+        previousPagesByRule.get(s.ruleId) ?? [],
+        withFix.has(s.ruleId),
+        ownerResolved.has(s.ruleId),
+      ),
+    )
     .sort((a, b) => severityRank(a.impact) - severityRank(b.impact) || b.spots - a.spots);
 
   // Introduced rules carry no positive fix signal (they're new/regressed) — both flags are false.
   const introducedDeltas = introduced
-    .map((s) => toDelta(s, false, false))
+    .map((s) => toDelta(s, currentPagesByRule.get(s.ruleId) ?? [], false, false))
     .sort((a, b) => severityRank(a.impact) - severityRank(b.impact) || b.spots - a.spots);
 
   return {

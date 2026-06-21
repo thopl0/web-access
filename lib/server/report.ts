@@ -627,6 +627,21 @@ const SITE_TRIAGE_TIERS = new Set<TriageRow["tier"]>(["high", "medium"]);
 /** Keep the site-level shortlist short so an owner isn't overwhelmed (mirrors `MAX_TRIAGE`). */
 const SITE_MAX_TRIAGE = 6;
 
+/** Collapse a risk-ordered triage list to ONE row per rule, keeping the first (highest-risk)
+ *  occurrence. Stored triage carries one entry per (ruleId, selector/instance), so a rule that
+ *  fires in many spots would otherwise repeat verbatim down the shortlist — a redundant wall of
+ *  text. Order-preserving so the legal-risk ranking is untouched. */
+function dedupeTriageByRule(rows: TriageRow[]): TriageRow[] {
+  const seen = new Set<string>();
+  const out: TriageRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.ruleId)) continue;
+    seen.add(row.ruleId);
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Build the report header's "Start here" content from already-loaded pages (no extra DB call). Prefers
  * a stored per-scan summary (AI prose when the owner's plan warmed it, else its deterministic text):
@@ -645,7 +660,10 @@ export function siteStartHere(pages: PageReport[]): SiteStartHere | null {
   if (stored) {
     return {
       plainSummary: stored.plainSummary,
-      triage: stored.triage.filter((t) => SITE_TRIAGE_TIERS.has(t.tier)).slice(0, SITE_MAX_TRIAGE),
+      triage: dedupeTriageByRule(stored.triage.filter((t) => SITE_TRIAGE_TIERS.has(t.tier))).slice(
+        0,
+        SITE_MAX_TRIAGE,
+      ),
       source: stored.source,
     };
   }
@@ -667,8 +685,12 @@ export function siteStartHere(pages: PageReport[]): SiteStartHere | null {
 
   const ranked = rankByLegalRisk(items);
   const triage: TriageRow[] = [];
+  const triagedRules = new Set<string>();
   for (const { item, risk } of ranked) {
     if (!SITE_TRIAGE_TIERS.has(risk.tier)) continue;
+    // One row per rule: a rule with many spots is already represented by its highest-risk one.
+    if (triagedRules.has(item.ruleId)) continue;
+    triagedRules.add(item.ruleId);
     triage.push({
       ruleId: item.ruleId,
       ...(item.selector ? { selector: item.selector } : {}),
