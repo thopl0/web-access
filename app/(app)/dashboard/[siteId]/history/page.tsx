@@ -96,10 +96,18 @@ export default async function ScanHistoryPage({
     );
   }
 
-  // Headline facts — latest snapshot vs the first one we have on record.
-  const latest = snapshots[0]!;
-  const first = snapshots[snapshots.length - 1]!; // oldest, since newest-first
-  const issuesDelta = snapshots.length >= 2 ? latest.counts.total - first.counts.total : null;
+  // Headline facts. Full crawls are the site-wide source of truth; single-page re-scans are
+  // spot checks between crawls. The score / open-issues / trend cards stay within the crawl
+  // scope so a 1-page re-scan never reads as "fixed 60 issues". Fall back to the latest snapshot
+  // overall only when no crawl exists yet.
+  const crawls = snapshots.filter((s) => s.isCrawl); // newest-first
+  const headline = crawls[0] ?? snapshots[0]!;
+  const hasSpotChecks = snapshots.some((s) => !s.isCrawl);
+
+  // Trend must be like-for-like: most recent crawl vs the FIRST crawl. Needs ≥ 2 crawls.
+  const firstCrawl = crawls[crawls.length - 1];
+  const issuesDelta =
+    crawls.length >= 2 ? crawls[0]!.counts.total - firstCrawl!.counts.total : null;
   const trendValue =
     issuesDelta === null
       ? "—"
@@ -108,23 +116,25 @@ export default async function ScanHistoryPage({
         : `${issuesDelta > 0 ? "+" : "−"}${Math.abs(issuesDelta)}`;
   const trendHint =
     issuesDelta === null
-      ? "Need two scans"
+      ? "Needs two full crawls"
       : issuesDelta > 0
-        ? "More issues than first scan"
+        ? "More issues than first crawl"
         : issuesDelta < 0
-          ? "Fewer issues than first scan"
-          : "Flat vs first scan";
+          ? "Fewer issues than first crawl"
+          : "Flat vs first crawl";
+
+  const scopeNote = crawls.length > 0 ? "Latest full crawl" : "Latest scan (no crawl yet)";
 
   const metrics: Metric[] = [
-    { label: "Latest score", value: latest.score, hint: "Out of 100" },
+    { label: "Latest score", value: headline.score, hint: scopeNote },
     {
       label: "Open issues now",
-      value: latest.counts.total,
-      ...(latest.counts.critical > 0 ? { severity: "critical" as const } : {}),
+      value: headline.counts.total,
+      ...(headline.counts.critical > 0 ? { severity: "critical" as const } : {}),
       hint:
-        latest.counts.critical > 0
-          ? `${latest.counts.critical} critical`
-          : latest.counts.total > 0
+        headline.counts.critical > 0
+          ? `${headline.counts.critical} critical`
+          : headline.counts.total > 0
             ? "None critical"
             : "All clear 🎉",
     },
@@ -142,6 +152,12 @@ export default async function ScanHistoryPage({
 
       <div className="mt-6">
         <MetricStrip items={metrics} />
+        {hasSpotChecks ? (
+          <p className="mt-3 text-xs text-fg-soft">
+            Headline numbers track full crawls. Single-page entries below are spot checks between
+            crawls — they cover one page, so don&apos;t read them against a full crawl.
+          </p>
+        ) : null}
       </div>
 
       <Section

@@ -33,6 +33,11 @@ export type ScanSnapshot = {
   counts: SeverityCounts;
   /** 0–100 health score (same scale as the dashboard score badge). */
   score: number;
+  /**
+   * True for full-site crawls (releaseId `crawl:<jobId>`); false for single-page re-scans
+   * (embed pings, in practice the homepage). Lets the UI avoid comparing across scopes.
+   */
+  isCrawl: boolean;
 };
 
 export type ScanTimeline = {
@@ -175,6 +180,7 @@ async function realSnapshots(siteId: string): Promise<SnapshotDetail[]> {
         pageCount,
         counts,
         score: healthScore(counts, pageCount),
+        isCrawl: isCrawlRelease(releaseId),
       },
       rules,
     });
@@ -185,9 +191,17 @@ async function realSnapshots(siteId: string): Promise<SnapshotDetail[]> {
   return details;
 }
 
+/**
+ * The single source of truth for "is this release a full-site crawl?". Crawl runs are keyed
+ * `crawl:<jobId>`; everything else is a single-page re-scan (an embed ping, usually the homepage).
+ */
+export function isCrawlRelease(releaseId: string): boolean {
+  return releaseId.startsWith("crawl:");
+}
+
 /** A friendly label for a release. Crawl runs are keyed `crawl:<jobId>`; otherwise show the id. */
 function releaseLabel(releaseId: string, scan: ScanRow): string {
-  if (releaseId.startsWith("crawl:")) {
+  if (isCrawlRelease(releaseId)) {
     const d = scan.completedAt ?? scan.createdAt;
     return `Crawl · ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   }

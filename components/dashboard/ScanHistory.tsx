@@ -65,6 +65,19 @@ function IssueDelta({ delta }: { delta: number | null }) {
   );
 }
 
+/**
+ * Quiet pill flagging a snapshot's scope: a full-site crawl vs a single-page spot check. Mirrors
+ * the StatusChip pill so the timeline reads consistently. The label carries the meaning (no
+ * color-only signal); it exists so a 1-page re-scan is never mistaken for a site-wide result.
+ */
+function ScopeChip({ isCrawl }: { isCrawl: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-panel-line-strong)] px-2.5 py-0.5 text-xs font-bold text-fg-soft">
+      {isCrawl ? "Full crawl" : "Spot check · 1 page"}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Timeline — distinct vertical-rail layout (ordered list, newest first).
  * ------------------------------------------------------------------ */
@@ -105,7 +118,10 @@ export function ScanTimelineList({ snapshots }: { snapshots: ScanSnapshot[] }) {
             <Panel as="article" className="min-w-0 flex-1 !p-4 sm:!p-5">
               <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                 <div className="min-w-0">
-                  <h3 className="font-display text-lg font-bold text-fg">{snap.label}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-lg font-bold text-fg">{snap.label}</h3>
+                    <ScopeChip isCrawl={snap.isCrawl} />
+                  </div>
                   <p className="mt-0.5 text-sm text-fg-soft">
                     <time dateTime={snap.createdAt}>{fmtDate(snap.createdAt)}</time>
                     {" · "}
@@ -247,6 +263,9 @@ export function ScanDiffView({ diff, siteId }: { diff: ScanDiff; siteId: string 
   const scoreDelta = diff.to.score - diff.from.score; // up = better (score)
   const better = scoreDelta > 0;
   const worse = scoreDelta < 0;
+  // Comparing a full crawl against a single-page spot check spans different page sets, so a big
+  // "fixed" delta can just be the narrower scan looking at fewer pages. Annotate, don't block.
+  const crossScope = diff.from.isCrawl !== diff.to.isCrawl;
 
   return (
     <div className="flex flex-col gap-8">
@@ -291,6 +310,14 @@ export function ScanDiffView({ diff, siteId }: { diff: ScanDiff; siteId: string 
           </span>
         </div>
       </div>
+
+      {crossScope ? (
+        <p className="-mt-4 text-xs text-fg-soft">
+          Heads up: these scans cover different page sets — one is a full crawl, the other a
+          single-page spot check. A large change here may just reflect the smaller scan, not work
+          done.
+        </p>
+      ) : null}
 
       {/* Three prominent columns */}
       <div className="grid gap-8 lg:grid-cols-3">
