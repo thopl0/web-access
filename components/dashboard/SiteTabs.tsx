@@ -13,6 +13,7 @@ export function SiteTabs({ siteId }: { siteId: string }) {
     { href: `/dashboard/${siteId}/pages`, label: "Pages" },
     { href: `/dashboard/${siteId}/history`, label: "History" },
     { href: `/dashboard/${siteId}/conformance`, label: "Conformance" },
+    { href: `/dashboard/${siteId}/reports`, label: "Reports" },
     { href: `/dashboard/${siteId}/settings`, label: "Settings" },
   ];
 

@@ -3,11 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import {
-  Award,
   CircleCheck,
   ExternalLink,
   FileSearch,
-  FileText,
   MinusCircle,
   XCircle,
 } from "lucide-react";
@@ -167,20 +165,6 @@ export default async function ConformancePage({
         actions={
           hasPages ? (
             <div className="flex flex-wrap items-center gap-2">
-              <a
-                href={`/api/sites/${siteId}/certificate`}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-3 py-2 text-sm font-bold text-fg no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--color-fg)_5%,transparent)]"
-              >
-                <Award className="size-4" strokeWidth={2.5} aria-hidden />
-                Certificate (PDF)
-              </a>
-              <a
-                href={`/api/sites/${siteId}/vpat`}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-3 py-2 text-sm font-bold text-fg no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--color-fg)_5%,transparent)]"
-              >
-                <FileText className="size-4" strokeWidth={2.5} aria-hidden />
-                VPAT (HTML)
-              </a>
               <PrintButton />
             </div>
           ) : undefined

@@ -14,7 +14,12 @@ import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/dashboard/ui";
 import { ScoreBadge } from "@/components/dashboard/ScoreBadge";
 import { SeverityBar, SeverityDot, StatusChip } from "@/components/dashboard/severity";
-import type { DiffRule, ScanDiff, ScanSnapshot } from "@/lib/server/insights";
+import type {
+  DiffRule,
+  ScanDiff,
+  ScanSnapshot,
+  SnapshotChange,
+} from "@/lib/server/insights";
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ *
@@ -24,10 +29,12 @@ import { cn } from "@/lib/utils";
 const MICRO = "font-display text-sm font-bold uppercase tracking-wide text-fg-soft";
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -78,11 +85,122 @@ function ScopeChip({ isCrawl }: { isCrawl: boolean }) {
   );
 }
 
+/* How many rule titles to list inline per side before collapsing to "…and N more". */
+const CHANGE_LIST_CAP = 4;
+
+/**
+ * Inline "what changed" for one timeline row vs the previous comparable scan (same scope). A compact
+ * native <details> (keyboard-accessible, no client JS): the summary states "N new · N fixed" with
+ * text-labelled, color-coded counts; expanding reveals the actual rule titles (via explainRule, carried
+ * down as serializable props). Each rule links to its issue page, matching the compare tool's rows.
+ */
+function ChangeSummary({ change, siteId }: { change: SnapshotChange; siteId: string }) {
+  if (!change.hasPrevious) {
+    return <span className="text-xs font-bold text-fg-soft">First of its kind</span>;
+  }
+
+  const newCount = change.introduced.length;
+  const fixedCount = change.resolved.length;
+  if (newCount === 0 && fixedCount === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-bold text-fg-soft">
+        <Minus className="size-3.5" aria-hidden strokeWidth={2.5} />
+        No rules changed
+      </span>
+    );
+  }
+
+  return (
+    <details className="group min-w-0">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold marker:content-none">
+        {newCount > 0 ? (
+          <span className="inline-flex items-center gap-1 text-pink">
+            <PlusCircle className="size-3.5" aria-hidden strokeWidth={2.5} />
+            {newCount} new
+            <span className="sr-only">{newCount === 1 ? "rule" : "rules"} introduced</span>
+          </span>
+        ) : null}
+        {fixedCount > 0 ? (
+          <span className="inline-flex items-center gap-1 text-green">
+            <CheckCircle2 className="size-3.5" aria-hidden strokeWidth={2.5} />
+            {fixedCount} fixed
+            <span className="sr-only">{fixedCount === 1 ? "rule" : "rules"} resolved</span>
+          </span>
+        ) : null}
+        <span className="text-fg-soft transition-transform group-open:rotate-180" aria-hidden>
+          ▾
+        </span>
+      </summary>
+      <div className="mt-3 flex flex-col gap-3 text-sm">
+        {newCount > 0 ? (
+          <ChangeRuleList title="New issues" accent="pink" rules={change.introduced} siteId={siteId} />
+        ) : null}
+        {fixedCount > 0 ? (
+          <ChangeRuleList title="Fixed" accent="green" rules={change.resolved} siteId={siteId} />
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function ChangeRuleList({
+  title,
+  accent,
+  rules,
+  siteId,
+}: {
+  title: string;
+  accent: "pink" | "green";
+  rules: SnapshotChange["introduced"];
+  siteId: string;
+}) {
+  const shown = rules.slice(0, CHANGE_LIST_CAP);
+  const overflow = rules.length - shown.length;
+  return (
+    <div>
+      <p
+        className={cn(
+          "font-display text-xs font-bold uppercase tracking-wide",
+          accent === "pink" ? "text-pink" : "text-green",
+        )}
+      >
+        {title}
+      </p>
+      <ul className="mt-1 flex flex-col gap-1">
+        {shown.map((r) => (
+          <li key={r.ruleId} className="flex items-start gap-2">
+            <span className="mt-1">
+              <SeverityDot severity={r.impact} />
+            </span>
+            <Link
+              href={`/dashboard/issues/${encodeURIComponent(`${siteId}:${r.ruleId}`)}`}
+              className="min-w-0 flex-1 font-bold text-fg no-underline underline-offset-2 hover:underline"
+            >
+              {r.title}
+            </Link>
+          </li>
+        ))}
+        {overflow > 0 ? (
+          <li className="pl-[18px] text-xs text-fg-soft">…and {overflow} more</li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Timeline — distinct vertical-rail layout (ordered list, newest first).
  * ------------------------------------------------------------------ */
 
-export function ScanTimelineList({ snapshots }: { snapshots: ScanSnapshot[] }) {
+export function ScanTimelineList({
+  snapshots,
+  changes,
+  siteId,
+}: {
+  snapshots: ScanSnapshot[];
+  changes: Record<string, SnapshotChange>;
+  siteId: string;
+}) {
   // snapshots are newest-first; the chronological predecessor of snapshot[i] is
   // snapshot[i + 1]. Issue-count delta vs that predecessor drives the momentum.
   return (
@@ -149,6 +267,14 @@ export function ScanTimelineList({ snapshots }: { snapshots: ScanSnapshot[] }) {
               </div>
               <div className="mt-2">
                 <SeverityBar counts={snap.counts} muted={snap.status !== "complete"} />
+              </div>
+
+              {/* What changed vs the previous comparable (same-scope) scan. */}
+              <div className="mt-4 border-t border-[var(--color-panel-line)] pt-3">
+                <ChangeSummary
+                  change={changes[snap.id] ?? { hasPrevious: false, introduced: [], resolved: [] }}
+                  siteId={siteId}
+                />
               </div>
             </Panel>
           </li>

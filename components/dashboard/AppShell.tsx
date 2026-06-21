@@ -30,6 +30,7 @@ function sectionsFor(id: string) {
     { href: `/dashboard/${id}/pages`, label: "Pages" },
     { href: `/dashboard/${id}/history`, label: "History" },
     { href: `/dashboard/${id}/conformance`, label: "Conformance" },
+    { href: `/dashboard/${id}/reports`, label: "Reports" },
     { href: `/dashboard/${id}/settings`, label: "Settings" },
   ];
 }

@@ -37,14 +37,20 @@ export default async function ScanHistoryPage({
   if (!site) notFound();
 
   const timeline = await getScanTimeline(siteId);
-  const { snapshots } = timeline;
+  const { snapshots, changes } = timeline;
 
-  // Default the compare to the two most recent snapshots (newest = `to`,
-  // chronological predecessor = `from`). Fall back gracefully if a passed id no
-  // longer resolves.
+  // Default the compare to the two most recent COMPARABLE snapshots (same scope — like-for-like),
+  // newest = `to`, its same-scope predecessor = `from`. Falls back to the two most recent overall if
+  // there's no same-scope pair. Honors explicit URL params first, ignoring ids that no longer resolve.
   const ids = new Set(snapshots.map((s) => s.id));
-  const toId = toParam && ids.has(toParam) ? toParam : snapshots[0]?.id;
-  const fromId = fromParam && ids.has(fromParam) ? fromParam : snapshots[1]?.id ?? snapshots[0]?.id;
+  const newest = snapshots[0];
+  const comparablePrev = newest
+    ? snapshots.find((s, i) => i > 0 && s.isCrawl === newest.isCrawl)
+    : undefined;
+  const defaultToId = newest?.id;
+  const defaultFromId = comparablePrev?.id ?? snapshots[1]?.id ?? newest?.id;
+  const toId = toParam && ids.has(toParam) ? toParam : defaultToId;
+  const fromId = fromParam && ids.has(fromParam) ? fromParam : defaultFromId;
 
   const canCompare = snapshots.length >= 2 && fromId && toId;
   const diff = canCompare ? await getScanDiff(siteId, fromId, toId) : null;
@@ -164,7 +170,7 @@ export default async function ScanHistoryPage({
         title="Timeline"
         description={`${snapshots.length} ${snapshots.length === 1 ? "scan" : "scans"}, newest first.`}
       >
-        <ScanTimelineList snapshots={snapshots} />
+        <ScanTimelineList snapshots={snapshots} changes={changes} siteId={siteId} />
       </Section>
 
       <Section

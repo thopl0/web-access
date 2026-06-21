@@ -13,12 +13,8 @@ import {
   ScanConfigForm,
 } from "@/components/dashboard/SiteSettingsForms";
 import { ShareToggle } from "@/components/dashboard/ShareExport";
-import { StatementSettings } from "@/components/dashboard/StatementSettings";
 import { RuntimeFixSettings } from "@/components/dashboard/RuntimeFixSettings";
-import { BuilderPromptCard } from "@/components/dashboard/BuilderPromptCard";
-import { isPlatform, type Platform } from "@/lib/platform";
 import { listRemediations } from "@/app/actions/remediation";
-import { Download } from "lucide-react";
 import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
@@ -65,9 +61,6 @@ export default async function SiteSettingsPage({
   const origin = await appOrigin();
   const snippet = embedSnippet(origin, site.id);
   const remediations = await listRemediations(site.id);
-
-  // The saved platform may be null (never set) or stale — narrow to a known Platform, default "other".
-  const platform: Platform = site.platform && isPlatform(site.platform) ? site.platform : "other";
 
   return (
     <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8">
@@ -121,47 +114,10 @@ export default async function SiteSettingsPage({
         </Section>
 
         <Section
-          title="Sharing & export"
-          description="Share a read-only report or export the issues."
+          title="Sharing"
+          description="Share a read-only report link. Downloadable reports live in the Reports tab."
         >
-          <div className="flex flex-col gap-6">
-            <ShareToggle siteId={site.id} origin={origin} initialToken={site.shareToken} />
-            <div className="flex flex-wrap gap-3 border-t border-[var(--color-panel-line)] pt-5">
-              <a
-                href={`/api/sites/${site.id}/export`}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-3 py-2 text-sm font-bold text-fg no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--color-fg)_5%,transparent)]"
-              >
-                <Download className="size-4" strokeWidth={2.5} aria-hidden />
-                Download issues (CSV)
-              </a>
-              <a
-                href={`/api/sites/${site.id}/fixpack`}
-                className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-3 py-2 text-sm font-bold text-fg no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--color-fg)_5%,transparent)]"
-              >
-                <Download className="size-4" strokeWidth={2.5} aria-hidden />
-                Download fix pack (Markdown)
-              </a>
-            </div>
-          </div>
-        </Section>
-
-        <Section
-          title="Builder fix prompt"
-          description="Generate one paste-ready message that fixes every issue, tailored to the tool you build your site with."
-        >
-          <BuilderPromptCard siteId={site.id} initialPlatform={platform} />
-        </Section>
-
-        <Section
-          title="Accessibility statement"
-          description="Publish a live, auto-updating accessibility statement for this site."
-        >
-          <StatementSettings
-            siteId={site.id}
-            origin={origin}
-            config={site.statementConfig}
-            initialToken={site.statementToken}
-          />
+          <ShareToggle siteId={site.id} origin={origin} initialToken={site.shareToken} />
         </Section>
 
         <Section

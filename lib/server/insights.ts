@@ -44,6 +44,28 @@ export type ScanTimeline = {
   siteId: string;
   /** Newest first. Empty until the site has been scanned. */
   snapshots: ScanSnapshot[];
+  /**
+   * Per-snapshot "what changed" vs the previous COMPARABLE snapshot (same scope), keyed by snapshot
+   * id. Aligned with `snapshots`. Lets the timeline show inline new/fixed without a manual compare.
+   */
+  changes: Record<string, SnapshotChange>;
+};
+
+/** A single rule that appeared or cleared between a snapshot and its predecessor. */
+export type ChangedRule = {
+  ruleId: string;
+  title: string;
+  impact: Severity;
+};
+
+/** What changed in one snapshot vs the previous comparable one (same scope). */
+export type SnapshotChange = {
+  /** False when this is the earliest snapshot of its scope — nothing to compare against. */
+  hasPrevious: boolean;
+  /** Rules present in this snapshot but not its predecessor (worst-first). */
+  introduced: ChangedRule[];
+  /** Rules present in the predecessor but cleared by this snapshot (worst-first). */
+  resolved: ChangedRule[];
 };
 
 export type DiffStatus = "new" | "fixed" | "regressed" | "unchanged" | "improved";
@@ -215,7 +237,44 @@ function releaseLabel(releaseId: string, scan: ScanRow): string {
 /** The site's scan timeline, newest first. Real data only — empty until the site is scanned. */
 export async function getScanTimeline(siteId: string): Promise<ScanTimeline> {
   const real = await realSnapshots(siteId);
-  return { siteId, snapshots: real.map((d) => d.snapshot) };
+  return {
+    siteId,
+    snapshots: real.map((d) => d.snapshot),
+    changes: snapshotChanges(real),
+  };
+}
+
+/**
+ * For each snapshot (newest-first details), compute what changed vs its previous COMPARABLE snapshot —
+ * the next older one of the SAME scope (crawl-vs-crawl, spot-check-vs-spot-check). Reuses `diffSnapshots`
+ * so the introduced/resolved sets stay identical to the compare tool, then trims them to the lightweight
+ * `ChangedRule` shape for the timeline. A snapshot with no same-scope predecessor gets hasPrevious:false.
+ */
+function snapshotChanges(details: SnapshotDetail[]): Record<string, SnapshotChange> {
+  const changes: Record<string, SnapshotChange> = {};
+  for (let i = 0; i < details.length; i++) {
+    const current = details[i]!;
+    // The next older detail of the same scope (details are newest-first).
+    let prev: SnapshotDetail | undefined;
+    for (let j = i + 1; j < details.length; j++) {
+      if (details[j]!.snapshot.isCrawl === current.snapshot.isCrawl) {
+        prev = details[j];
+        break;
+      }
+    }
+    if (!prev) {
+      changes[current.snapshot.id] = { hasPrevious: false, introduced: [], resolved: [] };
+      continue;
+    }
+    const diff = diffSnapshots(prev, current); // prev = earlier, current = later
+    const trim = (r: DiffRule): ChangedRule => ({ ruleId: r.ruleId, title: r.title, impact: r.impact });
+    changes[current.snapshot.id] = {
+      hasPrevious: true,
+      introduced: diff.added.map(trim),
+      resolved: diff.fixed.map(trim),
+    };
+  }
+  return changes;
 }
 
 /** Pure rule-level diff between two snapshot details (earlier `from` → later `to`). */
