@@ -146,13 +146,25 @@ async function getBrowser(): Promise<Browser> {
   return browser;
 }
 
+/** Identify the scanner honestly (default HeadlessChrome trips some hosts' bot protection → 503).
+ *  Matches the verifier's UA shape (lib/server/verify.ts). */
+const SCANNER_UA = "web-access-scanner/1.0 (+https://webaccessibilitychecker.org)";
+
+/** Throw on a non-2xx navigation so an error page (503/429/404/…) is never scored as real content —
+ *  better to retry (with backoff) and, if it persists, leave the page out of the report than to flag
+ *  the markup of a "Service Unavailable" page. `resp` is null only for same-document navigations. */
+function assertNavOk(resp: Awaited<ReturnType<Page["goto"]>>, url: string): void {
+  if (!resp) throw new Error(`navigation to ${url} returned no response`);
+  if (!resp.ok()) throw new Error(`navigation to ${url} returned HTTP ${resp.status()}`);
+}
+
 const worker = new Worker<RenderJob>(
   RENDER_QUEUE,
   async (job) => {
     const { scanId, siteId, url, renderedHtml } = job.data;
     await db.update(schema.scans).set({ status: "running" }).where(eq(schema.scans.id, scanId));
 
-    const context = await (await getBrowser()).newContext();
+    const context = await (await getBrowser()).newContext({ userAgent: SCANNER_UA });
     // Mark this as our renderer so the embed (if present on the page) no-ops and can't self-trigger.
     await context.addInitScript(() => {
       (window as unknown as Record<string, unknown>).__WEB_ACCESS_RENDERER = true;
@@ -162,7 +174,11 @@ const worker = new Worker<RenderJob>(
       if (renderedHtml) {
         await page.setContent(renderedHtml, { waitUntil: "domcontentloaded" });
       } else {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: env.NAV_TIMEOUT_MS });
+        const resp = await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: env.NAV_TIMEOUT_MS,
+        });
+        assertNavOk(resp, url);
       }
 
       // The owner's plan gates the AI tiers (judge / enrichment / AI fixes); the deterministic
@@ -456,7 +472,7 @@ const crawlWorker = new Worker<CrawlJob>(
     if (!siteRow || siteRow.status === "paused") return { skipped: true };
     const config = siteRow.scanConfig;
 
-    const context = await (await getBrowser()).newContext();
+    const context = await (await getBrowser()).newContext({ userAgent: SCANNER_UA });
     await context.addInitScript(() => {
       (window as unknown as Record<string, unknown>).__WEB_ACCESS_RENDERER = true;
     });
@@ -464,7 +480,13 @@ const crawlWorker = new Worker<CrawlJob>(
 
     let discovered: string[] = [];
     try {
-      await page.goto(origin, { waitUntil: "domcontentloaded", timeout: env.NAV_TIMEOUT_MS });
+      const resp = await page.goto(origin, {
+        waitUntil: "domcontentloaded",
+        timeout: env.NAV_TIMEOUT_MS,
+      });
+      // If the origin itself errors, don't discover (bogus) links from its error page — fail the
+      // crawl so it retries with backoff instead of seeding a run of error-page scans.
+      assertNavOk(resp, origin);
       const hrefs = await page.$$eval("a[href]", (els) =>
         els.map((e) => (e as HTMLAnchorElement).href),
       );

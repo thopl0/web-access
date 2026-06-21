@@ -49,7 +49,15 @@ export async function enqueueScan(input: {
   await getRenderQueue().add(
     "scan",
     { scanId, siteId, url, ...(renderedHtml ? { renderedHtml } : {}) },
-    { removeOnComplete: 500, removeOnFail: 500, attempts: 2 },
+    {
+      removeOnComplete: 500,
+      removeOnFail: 500,
+      // Retry transient nav failures (a 429/503 from an over-pressed host) with a real wait between
+      // tries, not BullMQ's 5ms default — a page that only errors momentarily recovers instead of
+      // being dropped, and a host that's rate-limiting us gets breathing room.
+      attempts: 3,
+      backoff: { type: "exponential", delay: 2000 },
+    },
   );
   return { scanId, deduped: false };
 }
@@ -73,6 +81,9 @@ export async function enqueueCrawl(
       ...(reason === "verified" ? { jobId: `crawl:${siteId}:verified` } : {}),
       removeOnComplete: 100,
       removeOnFail: 100,
+      // Retry a crawl whose origin momentarily errored (don't strand a site on one bad fetch).
+      attempts: 2,
+      backoff: { type: "exponential", delay: 5000 },
     },
   );
 }
