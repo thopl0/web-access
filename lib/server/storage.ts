@@ -148,7 +148,10 @@ function makeStorage(): Storage {
     }
     return new R2Storage(R2_ACCESS_KEY_ID, R2_ACCESS_KEY, base);
   }
-  return new LocalStorage(path.resolve(process.cwd(), env.STORAGE_DIR));
+  // The local driver is dev-only (prod uses R2). `path.resolve(process.cwd(), <dynamic>)` is not
+  // statically analyzable, so Turbopack's file tracer would otherwise pull the whole project into
+  // the deployment bundle — scope it out of the trace explicitly.
+  return new LocalStorage(path.resolve(/*turbopackIgnore: true*/ process.cwd(), env.STORAGE_DIR));
 }
 
 /** Process-wide storage client (one per driver config). */
