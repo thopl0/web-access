@@ -192,27 +192,26 @@ function ChangeRuleList({
 const PAGE_LIST_CAP = 20;
 
 /**
- * Which pages a scan covered — a compact native <details> (keyboard-accessible, no client JS). The
- * summary states "N pages scanned"; expanding reveals the page paths (font-mono, muted, mirroring the
- * AffectedPages list). The "…and N more" tail uses the true `pageCount`, which may exceed the carried
- * `pages` list for large crawls. A single-page spot check just shows the one path inline — no disclosure.
+ * Which pages a scan covered — a quiet, secondary disclosure tucked under the row's meta line so it
+ * never competes with the prominent "what changed" expander. The page count itself is the <details>
+ * summary (keyboard-accessible, no client JS): expanding reveals the page paths (font-mono, muted,
+ * mirroring the AffectedPages list). The "…and N more" tail uses the true `pageCount`, which may
+ * exceed the carried `pages` list for large crawls. A single-page spot check has no list to reveal,
+ * so the meta line already shows its one page — this renders nothing.
  */
 function ScannedPages({ pages, pageCount }: { pages: string[]; pageCount: number }) {
-  if (pages.length === 0) return null;
-
-  if (pageCount === 1) {
-    return (
-      <p className="break-all font-mono text-xs text-fg-soft">{pages[0]}</p>
-    );
-  }
+  if (pages.length === 0 || pageCount === 1) return null;
 
   const shown = pages.slice(0, PAGE_LIST_CAP);
   const overflow = pageCount - shown.length;
   return (
-    <details className="group min-w-0">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-fg-soft marker:content-none">
-        {pageCount} pages scanned
-        <span className="text-fg-soft transition-transform group-open:rotate-180" aria-hidden>
+    <details className="group/pages min-w-0">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-sm text-fg-soft underline-offset-2 marker:content-none hover:underline">
+        {pageCount} {pageCount === 1 ? "page" : "pages"}
+        <span
+          className="text-fg-soft transition-transform group-open/pages:rotate-180"
+          aria-hidden
+        >
           ▾
         </span>
       </summary>
@@ -284,11 +283,19 @@ export function ScanTimelineList({
                     <h3 className="font-display text-lg font-bold text-fg">{snap.label}</h3>
                     <ScopeChip isCrawl={snap.isCrawl} />
                   </div>
-                  <p className="mt-0.5 text-sm text-fg-soft">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-sm text-fg-soft">
                     <time dateTime={snap.createdAt}>{fmtDate(snap.createdAt)}</time>
-                    {" · "}
-                    {snap.pageCount} {snap.pageCount === 1 ? "page" : "pages"}
-                  </p>
+                    <span aria-hidden>·</span>
+                    {/* The page count doubles as the (quiet, secondary) "which pages" disclosure for
+                        multi-page scans; single-page scans show the plain count inline. */}
+                    {snap.pages.length > 0 && snap.pageCount > 1 ? (
+                      <ScannedPages pages={snap.pages} pageCount={snap.pageCount} />
+                    ) : (
+                      <span>
+                        {snap.pageCount} {snap.pageCount === 1 ? "page" : "pages"}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusChip status={snap.status} />
@@ -313,14 +320,8 @@ export function ScanTimelineList({
                 <SeverityBar counts={snap.counts} muted={snap.status !== "complete"} />
               </div>
 
-              {/* Which pages this scan covered. */}
-              {snap.pages.length > 0 ? (
-                <div className="mt-4 border-t border-[var(--color-panel-line)] pt-3">
-                  <ScannedPages pages={snap.pages} pageCount={snap.pageCount} />
-                </div>
-              ) : null}
-
-              {/* What changed vs the previous comparable (same-scope) scan. */}
+              {/* What changed vs the previous comparable (same-scope) scan — the row's one prominent
+                  disclosure. "Which pages" lives quietly in the meta line above. */}
               <div className="mt-4 border-t border-[var(--color-panel-line)] pt-3">
                 <ChangeSummary
                   change={changes[snap.id] ?? { hasPrevious: false, introduced: [], resolved: [] }}
@@ -463,7 +464,7 @@ export function ScanDiffView({ diff, siteId }: { diff: ScanDiff; siteId: string 
               </span>
               {diff.to.score}
             </p>
-            <p className="text-xs text-fg-soft">Health score</p>
+            <p className="text-xs text-fg-soft">Accessibility score</p>
           </div>
           <span
             className={cn(

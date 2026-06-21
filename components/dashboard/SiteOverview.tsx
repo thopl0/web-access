@@ -57,7 +57,7 @@ export function SiteOverview({
           ...(counts.serious > 0 ? { severity: "serious" as const } : {}),
           hint: counts.serious > 0 ? "High impact" : "None",
         },
-        { label: "Score", value: `${healthScore(counts, 1)}`, hint: "Out of 100" },
+        { label: "Accessibility score", value: `${healthScore(counts, 1)}`, hint: "Out of 100" },
       ]
     : [
         {
@@ -88,7 +88,7 @@ export function SiteOverview({
         title="Your pages"
         description="Every scanned page, with accessibility problems pinned where they are. Click a page to explore it."
       >
-        <SiteBoard pages={pages} onFocusChange={setFocusId} />
+        <SiteBoard pages={pages} onFocusChange={setFocusId} previewLimit={6} />
       </Section>
 
       <Section title={page ? "This page's health" : "Accessibility health"}>

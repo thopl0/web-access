@@ -121,8 +121,8 @@ export default async function SiteSettingsPage({
         </Section>
 
         <Section
-          title="Runtime fixes"
-          description="Apply approved accessibility fixes to your live site as a temporary patch while you fix the source."
+          title="Auto-apply fixes to your live site"
+          description="Automatically apply approved fixes to your live site so visitors get a more accessible page right away — while you (or your developer) update the original."
         >
           <RuntimeFixSettings
             siteId={site.id}

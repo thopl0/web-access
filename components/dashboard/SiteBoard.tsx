@@ -354,13 +354,18 @@ function PageTile({ page, onOpen }: { page: BoardPage; onOpen: () => void }) {
 export function SiteBoard({
   pages,
   onFocusChange,
+  previewLimit,
 }: {
   pages: BoardPage[];
   /** Notified whenever the focused page changes (null = back to the grid), so a parent can
    *  re-scope its own stats to the open page. */
   onFocusChange?: (id: string | null) => void;
+  /** When set, the grid shows only this many tiles behind a "Show all N pages" expander, so the
+   *  board reads as a preview rather than a scroll-wall. Opening a page still works as normal. */
+  previewLimit?: number;
 }) {
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const setFocus = useCallback(
     (id: string | null) => {
@@ -432,11 +437,26 @@ export function SiteBoard({
     );
   }
 
+  const collapsed = previewLimit != null && !showAll && pages.length > previewLimit;
+  const visible = collapsed ? pages.slice(0, previewLimit) : pages;
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {pages.map((p) => (
-        <PageTile key={p.id} page={p} onOpen={() => openFocus(p.id)} />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {visible.map((p) => (
+          <PageTile key={p.id} page={p} onOpen={() => openFocus(p.id)} />
+        ))}
+      </div>
+      {previewLimit != null && pages.length > previewLimit ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-link no-underline hover:underline"
+        >
+          {showAll ? "Show fewer pages" : `Show all ${pages.length} pages`}
+        </button>
+      ) : null}
+    </>
   );
 }

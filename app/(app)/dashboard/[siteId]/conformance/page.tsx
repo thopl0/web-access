@@ -133,8 +133,11 @@ export default async function ConformancePage({
       hint: summary.failed > 0 ? "Open issues map here" : "None failing",
     },
     { label: "Passed (automated)", value: automated, hint: "Cleared our checks" },
-    { label: "Not tested", value: summary.notTested, hint: "Needs manual review" },
-    { label: "Manual-review", value: summary.manualTotal, hint: `of ${summary.total} criteria` },
+    {
+      label: "Needs manual review",
+      value: summary.manualTotal,
+      hint: `of ${summary.total} criteria`,
+    },
   ];
 
   return (
@@ -287,7 +290,7 @@ function PrincipleSection({
                   Status
                 </th>
                 <th scope="col" className="px-4 py-2.5 font-display text-xs font-bold uppercase tracking-wide text-fg-soft">
-                  Coverage
+                  How we checked
                 </th>
               </tr>
             </thead>

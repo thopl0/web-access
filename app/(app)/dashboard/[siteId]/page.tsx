@@ -11,6 +11,7 @@ import { SiteStatusChip } from "@/components/dashboard/SiteStatusChip";
 import { InstallInstructions } from "@/components/dashboard/InstallInstructions";
 import { VerifyPanel } from "@/components/dashboard/VerifyPanel";
 import { SiteOverview } from "@/components/dashboard/SiteOverview";
+import { ScoreBadge } from "@/components/dashboard/ScoreBadge";
 import type { BoardPage } from "@/components/dashboard/SiteBoard";
 import { CodeChip, EmptyState, PageHeader, Panel } from "@/components/dashboard/ui";
 import { PageShell, Section } from "@/components/dashboard/layout";
@@ -176,6 +177,31 @@ export default async function SiteReportsPage({
         </EmptyState>
       ) : (
         <>
+          {/* Headline: lead with the single accessibility grade/score + the open-issue count, so a
+              non-technical owner sees "how am I doing" before any screenshots or issue lists. The
+              fuller health/trend panel still lives lower down (in SiteOverview). */}
+          <Panel className="mt-8">
+            <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+              <ScoreBadge counts={counts} pageCount={pages.length} />
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+                <div>
+                  <p className="font-display text-3xl font-bold tabular-nums text-fg">{counts.total}</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">
+                    {counts.total === 1 ? "Open issue" : "Open issues"}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    className={`font-display text-3xl font-bold tabular-nums ${counts.critical > 0 ? "text-pink" : "text-fg-soft"}`}
+                  >
+                    {counts.critical}
+                  </p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">Critical</p>
+                </div>
+              </div>
+            </div>
+          </Panel>
+
           {/* "Start here": the plain-English summary + legal-risk triage — the first thing an owner
               should read. Sits above the board so "what to fix first" leads the report. */}
           {startHere ? (
@@ -200,7 +226,16 @@ export default async function SiteReportsPage({
             </div>
           ) : null}
 
-          {/* Board + the metric band and health panel, which re-scope to a page when one is opened. */}
+          {/* The actual issues — what to fix — lead here, above the screenshot board. Filterable;
+              defaults to grouping by issue type so a problem that recurs on many pages reads as one
+              fixable entry, not N repeats. SiteReport renders its own control bar + results heading,
+              so the Section title here is the only "Issues" heading (no double heading). */}
+          <Section title="Issues">
+            <SiteReport rules={rules} pages={pages} counts={counts} siteId={siteId} />
+          </Section>
+
+          {/* Demoted "Your pages" board + the metric band and health/trend panel, which re-scope to a
+              page when one is opened. Sits below the issues so it's an explorer, not a scroll-wall. */}
           <SiteOverview
             pages={boardPages}
             siteCounts={counts}
@@ -237,33 +272,6 @@ export default async function SiteReportsPage({
                 </Button>
               </div>
             </Panel>
-          </Section>
-
-          {/* Filterable report. Defaults to grouping by issue type so a problem that
-              recurs on many pages reads as one fixable entry, not N repeats.
-              SiteReport renders its own control bar + results heading, so the Section
-              title here is the only "Issues" heading (no double heading). */}
-          <Section title="Issues">
-            {fixesLocked ? (
-              <Panel className="mb-6 border-l-4 border-l-[var(--color-link)]">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="font-display font-bold text-fg">
-                      Fixes are a Pro feature
-                    </p>
-                    <p className="mt-1 text-sm text-fg-soft">
-                      Your free plan shows every issue and why it matters. Upgrade to Pro for the
-                      paste-ready before→after fix on each one, AI judgment, and the copy-paste
-                      builder prompt.
-                    </p>
-                  </div>
-                  <Button href="/pricing" variant="blue" size="sm" className="shrink-0">
-                    Upgrade to Pro
-                  </Button>
-                </div>
-              </Panel>
-            ) : null}
-            <SiteReport rules={rules} pages={pages} counts={counts} siteId={siteId} />
           </Section>
         </>
       )}

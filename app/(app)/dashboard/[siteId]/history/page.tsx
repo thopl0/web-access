@@ -114,25 +114,29 @@ export default async function ScanHistoryPage({
   const firstCrawl = crawls[crawls.length - 1];
   const issuesDelta =
     crawls.length >= 2 ? crawls[0]!.counts.total - firstCrawl!.counts.total : null;
+  // Plain-language the trend: a positive issuesDelta means MORE issues (worse), so spell out the
+  // direction in words — matching the timeline's IssueDelta wording — rather than a signed integer.
   const trendValue =
     issuesDelta === null
       ? "—"
       : issuesDelta === 0
-        ? "±0"
-        : `${issuesDelta > 0 ? "+" : "−"}${Math.abs(issuesDelta)}`;
+        ? "No change"
+        : `${Math.abs(issuesDelta)} ${issuesDelta > 0 ? "more" : "fewer"} ${
+            Math.abs(issuesDelta) === 1 ? "issue" : "issues"
+          }`;
   const trendHint =
     issuesDelta === null
       ? "Needs two full crawls"
       : issuesDelta > 0
-        ? "More issues than first crawl"
+        ? "More issues than your first crawl"
         : issuesDelta < 0
-          ? "Fewer issues than first crawl"
-          : "Flat vs first crawl";
+          ? "Fewer issues than your first crawl"
+          : "Flat vs your first crawl";
 
   const scopeNote = crawls.length > 0 ? "Latest full crawl" : "Latest scan (no crawl yet)";
 
   const metrics: Metric[] = [
-    { label: "Latest score", value: headline.score, hint: scopeNote },
+    { label: "Accessibility score", value: headline.score, hint: scopeNote },
     {
       label: "Open issues now",
       value: headline.counts.total,
@@ -149,7 +153,7 @@ export default async function ScanHistoryPage({
       value: snapshots.length,
       hint: snapshots.length === 1 ? "scan" : "newest first",
     },
-    { label: "Trend vs first", value: trendValue, hint: trendHint },
+    { label: "Since your first crawl", value: trendValue, hint: trendHint },
   ];
 
   return (

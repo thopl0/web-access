@@ -103,6 +103,11 @@ export default async function ReportsPage({
                   VPAT (HTML)
                 </a>
               </div>
+            ) : null}
+            {hasPages ? (
+              <p className="text-xs text-fg-soft">
+                VPAT — the standard accessibility report procurement and legal teams ask for.
+              </p>
             ) : (
               <p className="border-t border-[var(--color-panel-line)] pt-5 text-sm text-fg-soft">
                 The conformance certificate and VPAT become available once at least one page has been
@@ -114,7 +119,7 @@ export default async function ReportsPage({
 
         <Section
           title="Developer handoff"
-          description="Hand the work off to whoever (or whatever) builds your site."
+          description="No developer? Paste this into your website builder or AI tool to apply every fix."
         >
           <div className="flex flex-col gap-6">
             <div>
@@ -133,6 +138,9 @@ export default async function ReportsPage({
                 Download fix pack (Markdown)
               </a>
             </div>
+            <p className="text-xs text-fg-soft">
+              Fix pack — a single file of every fix for your developer.
+            </p>
           </div>
         </Section>
 
@@ -149,6 +157,9 @@ export default async function ReportsPage({
               Download issues (CSV)
             </a>
           </div>
+          <p className="mt-3 text-xs text-fg-soft">
+            CSV — the raw issue list for spreadsheets or your own tools.
+          </p>
         </Section>
       </div>
     </div>

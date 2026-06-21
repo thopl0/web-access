@@ -47,7 +47,7 @@ export default async function SitePagesPage({
     <PageShell>
       <PageHeader
         titleId="pages-title"
-        eyebrow="Monitored pages"
+        eyebrow="Your pages"
         title={site.name}
         lead={
           site.origin ? (
@@ -69,6 +69,10 @@ export default async function SitePagesPage({
         actions={<RecrawlButton siteId={siteId} />}
       />
 
+      <p className="mt-3 text-sm text-fg-soft">
+        A crawl finds your pages; a scan checks each one for problems.
+      </p>
+
       {pages.length === 0 ? (
         <EmptyState
           className="mt-8"
@@ -76,7 +80,7 @@ export default async function SitePagesPage({
           title="No pages monitored yet"
         >
           Once the embed runs — or after a crawl — the pages we&apos;re watching show up here. Use
-          Re-crawl to discover them now.
+          Find new pages to discover them now.
         </EmptyState>
       ) : (
         <Section
@@ -100,7 +104,7 @@ export default async function SitePagesPage({
                       {pathOf(p.url)}
                       {p.grouped ? (
                         <span className="ml-2 text-xs font-normal text-fg-soft">
-                          {p.pageCount} pages (same route)
+                          {p.pageCount} similar pages
                         </span>
                       ) : null}
                     </p>

@@ -30,7 +30,7 @@ export function RecrawlButton({ siteId }: { siteId: string }) {
         ) : (
           <RefreshCw className="size-4" strokeWidth={2.5} aria-hidden />
         )}
-        {pending ? "Queuing…" : "Re-crawl"}
+        {pending ? "Queuing…" : "Find new pages"}
       </Button>
       <span role="status" aria-live="polite" className="text-xs font-bold text-green">
         {done ? "Crawl queued" : ""}
@@ -68,7 +68,7 @@ export function RescanButton({ siteId, url }: { siteId: string; url: string }) {
         ) : (
           <ScanLine className="size-3.5" strokeWidth={2.5} aria-hidden />
         )}
-        {pending ? "Queuing…" : "Rescan"}
+        {pending ? "Queuing…" : "Check again now"}
       </button>
       <span role="status" aria-live="polite" className="text-xs font-bold text-green">
         {done ? "Queued" : ""}

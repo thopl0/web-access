@@ -40,7 +40,7 @@ export function RuntimeFixSettings({
       const res = await setRuntimeRemediation(siteId, next);
       if (!res.ok) {
         setEnabled(!next);
-        setError(res.error ?? "Couldn't update runtime fixes.");
+        setError(res.error ?? "Couldn't update auto-apply fixes.");
       }
     });
   }
@@ -56,16 +56,17 @@ export function RuntimeFixSettings({
             disabled={togglePending}
             className="size-5 accent-[var(--color-blue)]"
           />
-          Apply approved fixes to my live site
+          Auto-apply approved fixes to my live site
           {togglePending ? (
             <Loader2 className="size-4 animate-spin text-fg-soft" aria-hidden />
           ) : null}
         </label>
         <p className="text-sm text-fg-soft">
-          With this on, the snippet adds the accessibility attributes you&apos;ve approved (labels,
-          alt text, language, roles) to your pages as they load. This is a temporary patch — it
-          changes nothing visually and never replaces fixing the source, which stays the real fix.
-          Only fixes you explicitly approve are ever applied.
+          With this on, the snippet automatically adds the accessibility fixes you&apos;ve approved
+          (labels, alt text, language, roles) to your pages as they load, so visitors get a more
+          accessible page right away. This is a temporary patch — it changes nothing visually and
+          never replaces updating the original, which stays the real fix. Only fixes you explicitly
+          approve are ever applied.
         </p>
         {error ? (
           <p role="alert" className="text-sm font-bold text-pink">
@@ -103,7 +104,7 @@ export function RuntimeFixSettings({
         ) : (
           <>
             {!enabled ? (
-              <p className="text-sm text-fg-soft">Turn on runtime fixes above to apply these.</p>
+              <p className="text-sm text-fg-soft">Turn on auto-apply above to apply these.</p>
             ) : null}
             <ul className="flex flex-col gap-3">
               {list.map((rem) => (
