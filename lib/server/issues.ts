@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import type { Finding, Impact, IssueStatus } from "@web-access/shared";
 import { db, schema } from "./db";
-import { getSitePages, rollupByRule, type RulePage, type RuleRollup } from "./report";
+import { getSitePages, rollupByRule, type PageReport, type RulePage, type RuleRollup } from "./report";
 import { SEVERITY_ORDER, SEVERITY_RANK, emptyCounts, type Severity, type SeverityCounts } from "@/lib/severity";
 
 /**
@@ -123,10 +123,13 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
   const rows: IssueRow[] = [];
 
   for (const site of sites) {
-    const { pages } = await getSitePages(site.id, { evidence: false });
+    // evidence:true so we get each spot's fix/patches, to drop spots already covered by a live patch
+    // (so the inbox's spot counts match the per-site report after "apply all").
+    const { pages } = await getSitePages(site.id, { evidence: true });
+    const ctx = await getLiveFixContext(site.id);
     const lastSeenAt =
       pages.reduce<string | null>((max, p) => (!max || p.scannedAt > max ? p.scannedAt : max), null);
-    const rollups = rollupByRule(pages);
+    const rollups = rollupByRule(filterLiveFixedElements(pages, ctx));
 
     for (const r of rollups) {
       const key = `${site.id}:${r.ruleId}`;
@@ -309,6 +312,62 @@ export async function openRuleIds(siteId: string, rollups: RuleRollup[]): Promis
     }
   }
   return open;
+}
+
+/**
+ * Spot-level live-fix accounting. A finding (spot) whose fix has been applied as an ENABLED live
+ * remediation is no longer a live failure, so it shouldn't be counted as open — applying "fix all"
+ * should visibly drop the count, and an issue auto-closes once every spot is covered (handled in
+ * markIssueFixedIfFullyCovered). Spots with no machine-applicable fix always stay open.
+ */
+export type LiveFixContext = { enabled: Set<string>; cssOn: boolean };
+
+export async function getLiveFixContext(siteId: string): Promise<LiveFixContext> {
+  const site = (
+    await db
+      .select({ css: schema.sites.cssRemediation })
+      .from(schema.sites)
+      .where(eq(schema.sites.id, siteId))
+      .limit(1)
+  )[0];
+  const rows = await db
+    .select({ kind: schema.remediations.kind, selector: schema.remediations.selector, attr: schema.remediations.attr })
+    .from(schema.remediations)
+    .where(and(eq(schema.remediations.siteId, siteId), eq(schema.remediations.enabled, true)));
+  return { enabled: new Set(rows.map((r) => `${r.kind}\n${r.selector}\n${r.attr}`)), cssOn: Boolean(site?.css) };
+}
+
+/**
+ * True when an element's fix is fully applied as enabled live remediations (so its spot no longer
+ * counts as open). Mirrors markIssueFixedIfFullyCovered's per-element coverage test — an enabled
+ * remediation always carries a real value (placeholders are rejected at approval), so presence is
+ * enough. CSS patches only count when the site's experimental CSS opt-in is on.
+ */
+export function isElementLiveFixed(
+  selector: string,
+  fix: { attributePatch?: { attr: string }[]; cssPatch?: { prop: string }[] } | undefined,
+  ctx: LiveFixContext,
+): boolean {
+  const attrPatches = fix?.attributePatch ?? [];
+  const cssPatches = fix?.cssPatch ?? [];
+  if (attrPatches.length === 0 && cssPatches.length === 0) return false; // no machine fix → always open
+  for (const p of attrPatches) if (!ctx.enabled.has(`attr\n${selector}\n${p.attr}`)) return false;
+  for (const p of cssPatches) {
+    if (!ctx.cssOn) return false;
+    if (!ctx.enabled.has(`css\n${selector}\n${p.prop}`)) return false;
+  }
+  return true;
+}
+
+/** Drop already-live-fixed spots from each page's groups (and groups left empty), so rollups + counts
+ *  built from the result reflect only spots that are still actually failing. */
+export function filterLiveFixedElements(pages: PageReport[], ctx: LiveFixContext): PageReport[] {
+  return pages.map((p) => ({
+    ...p,
+    groups: p.groups
+      .map((g) => ({ ...g, elements: g.elements.filter((el) => !isElementLiveFixed(el.selector, el.fix, ctx)) }))
+      .filter((g) => g.elements.length > 0),
+  }));
 }
 
 export type IssueDetail = {

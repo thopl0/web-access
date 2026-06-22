@@ -22,7 +22,7 @@ import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
 import { getIssuesTrend, getSitePages, pathOf, rollupByRule, siteStartHere } from "@/lib/server/report";
-import { openRuleIds } from "@/lib/server/issues";
+import { getLiveFixContext, isElementLiveFixed, openRuleIds } from "@/lib/server/issues";
 import { getScanDelta } from "@/lib/server/verification";
 import { explainRule } from "@/lib/explain";
 import { SEVERITY_RANK, emptyCounts, type Severity } from "@/lib/severity";
@@ -59,12 +59,17 @@ export default async function SiteReportsPage({
   const snippet = embedSnippet(await appOrigin(), site.id);
 
   // Lifecycle-aware view: drop rules the owner has already fixed / auto-fixed / muted, so this report
-  // agrees with the Issues tab. It used to render RAW scan findings — fixed issues lingered in the list
-  // and every count was inflated (e.g. 274 "open" when only 242 / 4 types were actually open).
+  // agrees with the Issues tab (it used to render RAW scan findings — fixed issues lingered, counts
+  // were inflated). AND drop individual spots already covered by an enabled live patch, so applying
+  // "fix all" visibly reduces the count (e.g. contrast 156 → 87 once the auto-fixable spots are patched)
+  // and a rule disappears once every spot is covered.
   const openIds = await openRuleIds(siteId, allRules);
-  const rules = allRules.filter((r) => openIds.has(r.ruleId));
+  const liveFix = await getLiveFixContext(siteId);
   const pages = allPages.map((p) => {
-    const groups = p.groups.filter((g) => openIds.has(g.ruleId));
+    const groups = p.groups
+      .filter((g) => openIds.has(g.ruleId))
+      .map((g) => ({ ...g, elements: g.elements.filter((el) => !isElementLiveFixed(el.selector, el.fix, liveFix)) }))
+      .filter((g) => g.elements.length > 0);
     const c = emptyCounts();
     for (const g of groups) {
       const sev = g.impact as Severity | null;
@@ -75,6 +80,7 @@ export default async function SiteReportsPage({
     }
     return { ...p, groups, counts: c };
   });
+  const rules = rollupByRule(pages);
 
   // Open totals: `counts` = open spots by severity (drives the score / donut / severity bar); `openTypes`
   // + `openPageCount` are the "N types of issues across M pages" headline; `openCriticalTypes` = the
