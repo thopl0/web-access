@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { ExternalLink, Sparkles } from "lucide-react";
+import { ExternalLink, Inbox, Sparkles } from "lucide-react";
 
-import { BackLink, PageHeader, Panel } from "@/components/dashboard/ui";
+import { BackLink, EmptyState, PageHeader, Panel } from "@/components/dashboard/ui";
 import { PageShell, Section } from "@/components/dashboard/layout";
 import { Badge } from "@/components/ui/Badge";
 import { SeverityBadge } from "@/components/dashboard/severity";
@@ -85,8 +84,39 @@ export default async function IssueDetailPage({
   const { from } = await searchParams;
   const { userId } = await verifySession();
 
-  const issue = await getIssueDetail(userId, decodeURIComponent(key));
-  if (!issue) notFound();
+  // `key` arrives already URL-decoded by Next's route matcher, so we do NOT decode it again — a second
+  // decodeURIComponent would corrupt any value whose decoded form still contains a literal '%'.
+  const issue = await getIssueDetail(userId, key);
+
+  // A validly-linked issue can disappear between the list rendering and the click: a re-scan may have
+  // dropped the rule (often because it was just fixed) or the page changed, so it's no longer in the
+  // current rollup. Rather than a jarring hard 404, return a calm note with a route back to the list.
+  // `from` (when present + valid) sends them to the per-site issues list they came from.
+  const fromSite = parseFrom(from);
+  if (!issue) {
+    const missingBackHref = fromSite ? `/dashboard/${fromSite}/issues` : "/dashboard/issues";
+    return (
+      <PageShell>
+        <BackLink href={missingBackHref}>Back to issues</BackLink>
+        <EmptyState
+          className="mt-8"
+          icon={<Inbox className="size-6" aria-hidden strokeWidth={2.25} />}
+          title="This issue is no longer here"
+          action={
+            <Link
+              href={missingBackHref}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-blue/50 bg-blue/5 px-3 py-1.5 text-sm font-bold text-blue no-underline transition-colors hover:bg-blue/10"
+            >
+              View current issues
+            </Link>
+          }
+        >
+          It may have been resolved, or the page changed since you opened this. Head back to your
+          issues to see what&apos;s open now.
+        </EmptyState>
+      </PageShell>
+    );
+  }
 
   const ex = explainRule(issue.ruleId);
 
@@ -102,7 +132,6 @@ export default async function IssueDetailPage({
 
   // Back link: when arriving from a per-site issues list (and the id matches this issue's site),
   // return there; otherwise fall back to the global inbox.
-  const fromSite = parseFrom(from);
   const backToSite = fromSite && fromSite === issue.siteId;
   const backHref = backToSite ? `/dashboard/${issue.siteId}/issues` : "/dashboard/issues";
   const backLabel = backToSite ? `Back to ${issue.siteName} issues` : "Back to issues";

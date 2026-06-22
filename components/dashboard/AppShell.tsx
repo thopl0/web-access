@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   Check,
   ChevronDown,
@@ -110,7 +110,10 @@ function SiteSwitcher({
   current: SiteNav | null;
   pathname: string;
 }) {
-  const onAllSites = pathname === "/dashboard" || pathname.startsWith("/dashboard/issues");
+  // Only truly "all sites" when no site is resolved — on the issue-detail route `current` may be set
+  // from `?from`, in which case the originating site (not "All sites") should read as selected.
+  const onAllSites =
+    !current && (pathname === "/dashboard" || pathname.startsWith("/dashboard/issues"));
   return (
     <Menu_
       label={
@@ -221,7 +224,13 @@ function SectionTabs({
   return (
     <nav aria-label={current ? "Site sections" : "Dashboard"} className="-mb-px flex gap-1 overflow-x-auto">
       {tabs.map((t) => {
-        const active = t.exact ? pathname === t.href : pathname === t.href || pathname.startsWith(`${t.href}/`);
+        // The global issue-detail route (/dashboard/issues/<key>) is conceptually the site's Issues
+        // tab when we got here via `?from`, so light up the per-site Issues tab there too.
+        const isIssuesDetail =
+          t.href.endsWith("/issues") && /^\/dashboard\/issues\/.+/.test(pathname);
+        const active = t.exact
+          ? pathname === t.href
+          : pathname === t.href || pathname.startsWith(`${t.href}/`) || isIssuesDetail;
         return (
           <Link
             key={t.href}
@@ -263,7 +272,15 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const current = sites.find((s) => s.id === currentSiteId(pathname)) ?? null;
+  const searchParams = useSearchParams();
+  // The global issue-detail route (/dashboard/issues/[key]) has no site segment in its path, so the
+  // nav would otherwise lose site context and fall back to "All sites". The issue links carry a
+  // `?from=<siteId>`, so honor it here to keep the originating site selected and its section tabs
+  // shown. Links from the global inbox omit `from`, so those correctly stay on "All sites".
+  const pathSite = currentSiteId(pathname);
+  const fromSite =
+    !pathSite && /^\/dashboard\/issues\/.+/.test(pathname) ? searchParams.get("from") : null;
+  const current = sites.find((s) => s.id === (pathSite ?? fromSite)) ?? null;
   const [drawer, setDrawer] = useState(false);
   const closeDrawer = () => setDrawer(false);
 
