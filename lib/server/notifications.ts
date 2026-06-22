@@ -17,6 +17,15 @@ import { getScanDelta } from "./verification";
 /** Only ever surface the last 30 days, so a brand-new bell (never opened) doesn't show all of history. */
 const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * A crawl is "notable" (worth a notification) only if it scanned more than one page — i.e. a real
+ * site crawl, not one of the frequent single-page embed re-scan pings that would otherwise drown the
+ * feed in "re-scanned · 1 page · no change" noise. SQL HAVING over the per-crawl distinct-URL count.
+ * (Trade-off: a genuinely single-page site never notifies; acceptable — those are rare and the
+ * per-site report's "what changed" panel still covers issue changes.)
+ */
+const NOTABLE_CRAWL = sql`count(distinct ${schema.scans.url}) > 1`;
+
 export type NotificationItem = {
   /** `${siteId}:${releaseId}` — stable per crawl. */
   id: string;
@@ -73,7 +82,8 @@ export async function countUnreadNotifications(userId: string): Promise<number> 
         gt(schema.scans.completedAt, threshold),
       ),
     )
-    .groupBy(schema.scans.siteId, schema.scans.releaseId);
+    .groupBy(schema.scans.siteId, schema.scans.releaseId)
+    .having(NOTABLE_CRAWL);
   return rows.length;
 }
 
@@ -109,6 +119,7 @@ export async function getNotificationFeed(userId: string): Promise<NotificationI
       ),
     )
     .groupBy(schema.scans.siteId, schema.scans.releaseId)
+    .having(NOTABLE_CRAWL)
     .orderBy(desc(sql`max(${schema.scans.completedAt})`))
     .limit(20);
 
