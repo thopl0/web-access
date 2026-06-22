@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, ChevronDown, Code2, FileText, Layers, Loader2, MapPin, Sparkles, Zap } from "lucide-react";
 
 import type { ElementBox, PageShot } from "@/lib/server/report";
@@ -9,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { Button } from "@/components/ui/Button";
-import { approveRemediation, setRuntimeRemediation } from "@/app/actions/remediation";
+import { applyFixesToIssue, approveRemediation, setRuntimeRemediation, type PatchInput } from "@/app/actions/remediation";
 
 /**
  * Serializable description of one offending element instance. The page builds
@@ -130,12 +131,15 @@ function stripTodo(value: string): string {
  */
 function ApplyPatch({
   siteId,
+  ruleId,
   selector,
   patch,
   needsReview,
   runtimeEnabled,
 }: {
   siteId: string;
+  /** The issue's rule, so applying can auto-mark the issue "fixed" once every spot is covered. */
+  ruleId?: string;
   selector: string;
   patch: { attr: string; value: string };
   needsReview: boolean;
@@ -143,6 +147,7 @@ function ApplyPatch({
   runtimeEnabled: boolean;
 }) {
   const inputId = useId();
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [applied, setApplied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,9 +169,10 @@ function ApplyPatch({
           return;
         }
       }
-      const res = await approveRemediation(siteId, { selector, attr: patch.attr, value });
+      const res = await approveRemediation(siteId, { selector, attr: patch.attr, value }, ruleId);
       if (res.ok) {
         setApplied(true);
+        router.refresh(); // reflect any "Fixed (live)" status change without a manual reload
       } else {
         setError(res.error ?? "Couldn't apply this fix.");
       }
@@ -254,11 +260,13 @@ export function FixBlock({
   fix,
   selector,
   siteId,
+  ruleId,
   runtimeEnabled,
 }: {
   fix: NonNullable<SpotElement["fix"]>;
   selector: string;
   siteId: string;
+  ruleId?: string;
   runtimeEnabled: boolean;
 }) {
   const canApply = Boolean(fix.attributePatch && fix.attributePatch.length > 0);
@@ -307,6 +315,7 @@ export function FixBlock({
           <ApplyPatch
             key={`${patch.attr}-${i}`}
             siteId={siteId}
+            ruleId={ruleId}
             selector={selector}
             patch={patch}
             needsReview={review}
@@ -331,6 +340,76 @@ export function FixBlock({
   );
 }
 
+/**
+ * One-click "fix every applyable spot of this issue". Each patch carries its own (AI-generated,
+ * per-element) value, so this applies all of them at once via `applyFixesToIssue`, which also marks
+ * the issue "Fixed (live)" when every spot ends up covered. Shown only when there are >1 applyable
+ * spots (a single spot is already covered by its own Apply button).
+ */
+export function ApplyAllFixes({
+  siteId,
+  ruleId,
+  patches,
+  runtimeEnabled,
+}: {
+  siteId: string;
+  ruleId: string;
+  patches: PatchInput[];
+  runtimeEnabled: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ applied: number; skipped: number; fixed: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await applyFixesToIssue(siteId, ruleId, patches);
+      if (res.ok) {
+        setResult({ applied: res.applied ?? 0, skipped: res.skipped ?? 0, fixed: Boolean(res.fixed) });
+        router.refresh();
+      } else {
+        setError(res.error ?? "Couldn't apply these fixes.");
+      }
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-green/30 bg-green/5 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-green">
+        <Zap className="size-3.5" aria-hidden strokeWidth={2.5} />
+        Fix every spot at once
+      </p>
+      <p className="mt-1 text-xs text-fg-soft">
+        Applies the suggested fix to all {patches.length} matching spots live — each with its own
+        AI-generated value.{runtimeEnabled ? "" : " Applying turns on live fixes for this site."}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {result ? (
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-green" role="status">
+            <Check className="size-4" aria-hidden strokeWidth={2.5} />
+            Applied {result.applied} live{result.fixed ? " · issue fixed" : ""}
+            {result.skipped > 0 ? (
+              <span className="font-normal text-fg-soft"> · {result.skipped} need a value or source change</span>
+            ) : null}
+          </span>
+        ) : (
+          <Button type="button" variant="green" size="sm" onClick={apply} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Zap className="size-4" aria-hidden strokeWidth={2.5} />}
+            {pending ? "Applying…" : `Apply fix to all ${patches.length} spots`}
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <p role="alert" aria-live="assertive" className="mt-2 text-sm font-bold text-pink">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function PageList({ paths, extra }: { paths: string[]; extra: number }) {
   const SHOWN = 5;
   const shown = paths.slice(0, SHOWN);
@@ -348,11 +427,13 @@ function PatternCard({
   pattern,
   idBase,
   siteId,
+  ruleId,
   runtimeEnabled,
 }: {
   pattern: SpotPattern;
   idBase: string;
   siteId: string;
+  ruleId?: string;
   runtimeEnabled: boolean;
 }) {
   const ex = pattern.example;
@@ -383,7 +464,7 @@ function PatternCard({
       {ex.explanation ? <AiExplanation explanation={ex.explanation} /> : null}
 
       {ex.fix ? (
-        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
+        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} />
       ) : (
         <NoFixHint siteId={siteId} />
       )}
@@ -399,11 +480,13 @@ function PageCard({
   page,
   idBase,
   siteId,
+  ruleId,
   runtimeEnabled,
 }: {
   page: SpotPage;
   idBase: string;
   siteId: string;
+  ruleId?: string;
   runtimeEnabled: boolean;
 }) {
   return (
@@ -434,7 +517,7 @@ function PageCard({
             />
             {el.explanation ? <AiExplanation explanation={el.explanation} /> : null}
             {el.fix ? (
-              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} runtimeEnabled={runtimeEnabled} />
+              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} />
             ) : (
               <NoFixHint siteId={siteId} />
             )}
@@ -451,12 +534,14 @@ export function IssueSpots({
   pages,
   totalSpots,
   siteId,
+  ruleId,
   runtimeEnabled,
 }: {
   patterns: SpotPattern[];
   pages: SpotPage[];
   totalSpots: number;
   siteId: string;
+  ruleId?: string;
   runtimeEnabled: boolean;
 }) {
   const [view, setView] = useState<View>("pattern");
@@ -557,6 +642,7 @@ export function IssueSpots({
                   pattern={p}
                   idBase={`${railId}-pat-${i}`}
                   siteId={siteId}
+                  ruleId={ruleId}
                   runtimeEnabled={runtimeEnabled}
                 />
               ))
@@ -566,6 +652,7 @@ export function IssueSpots({
                   page={p}
                   idBase={`${railId}-page-${i}`}
                   siteId={siteId}
+                  ruleId={ruleId}
                   runtimeEnabled={runtimeEnabled}
                 />
               ))}

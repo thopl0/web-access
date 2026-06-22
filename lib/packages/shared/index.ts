@@ -176,9 +176,11 @@ export type SiteStatus = z.infer<typeof SiteStatus>;
 /**
  * Durable status an owner can assign to an issue (overlaid on the per-scan findings via the
  * `issueOverrides` table). `open` is the implicit default for any issue without an override;
- * a `resolved`/`ignored`/`snoozed` issue auto-reopens if a later scan still detects it.
+ * a non-open issue auto-reopens if a later scan's occurrence set CHANGES. `fixed` is set by the
+ * system (not the owner) when every spot of the issue has been covered by an applied live fix — it
+ * reads as "Fixed (live)" and, like the owner-set mutes, drops out of the default open inbox.
  */
-export const IssueStatus = z.enum(["open", "ignored", "resolved", "snoozed"]);
+export const IssueStatus = z.enum(["open", "ignored", "resolved", "snoozed", "fixed"]);
 export type IssueStatus = z.infer<typeof IssueStatus>;
 
 /**

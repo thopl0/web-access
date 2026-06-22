@@ -15,6 +15,13 @@ function StatusTag({ issue }: { issue: IssueRow }) {
       </span>
     );
   }
+  if (issue.status === "fixed") {
+    return (
+      <span className="rounded-full bg-green/15 px-2 py-0.5 text-xs font-bold text-green">
+        Fixed (live)
+      </span>
+    );
+  }
   if (issue.status === "resolved") {
     return (
       <span className="rounded-full bg-green/15 px-2 py-0.5 text-xs font-bold text-green">

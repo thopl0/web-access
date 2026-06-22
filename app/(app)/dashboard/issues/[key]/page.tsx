@@ -10,7 +10,7 @@ import { IssueActions } from "@/components/dashboard/IssueActions";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
-import { FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
+import { ApplyAllFixes, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
 import { eq } from "drizzle-orm";
 
 import { verifySession } from "@/lib/server/dal";
@@ -223,6 +223,21 @@ export default async function IssueDetailPage({
       : null;
   const heroSpot = hero ? toSpotElement(hero.el, hero.shot) : null;
 
+  // Every distinct safe patch that can be applied live right now (one per selector+attr, skipping
+  // placeholder values that still need a human). This is the payload for the one-click "apply to all".
+  const isPlaceholderValue = (v: string) => /^\s*todo\b/i.test(v);
+  const applyablePatches: { selector: string; attr: string; value: string }[] = [];
+  const seenPatch = new Set<string>();
+  for (const i of instances) {
+    for (const p of i.el.fix?.attributePatch ?? []) {
+      if (isPlaceholderValue(p.value)) continue;
+      const k = `${i.el.selector}\n${p.attr}`;
+      if (seenPatch.has(k)) continue;
+      seenPatch.add(k);
+      applyablePatches.push({ selector: i.el.selector, attr: p.attr, value: p.value });
+    }
+  }
+
   // Meta strip facts.
   const effort = effortOf(issue.ruleId);
   const wcagChips = issue.wcag
@@ -352,8 +367,20 @@ export default async function IssueDetailPage({
                     fix={heroSpot.fix}
                     selector={heroSpot.selector}
                     siteId={issue.siteId}
+                    ruleId={issue.ruleId}
                     runtimeEnabled={runtimeEnabled}
                   />
+                  {/* Bulk path: apply the same kind of fix to every other matching spot in one click. */}
+                  {applyablePatches.length > 1 ? (
+                    <div className="mt-3">
+                      <ApplyAllFixes
+                        siteId={issue.siteId}
+                        ruleId={issue.ruleId}
+                        patches={applyablePatches}
+                        runtimeEnabled={runtimeEnabled}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -387,6 +414,7 @@ export default async function IssueDetailPage({
             pages={pages}
             totalSpots={totalSpots}
             siteId={issue.siteId}
+            ruleId={issue.ruleId}
             runtimeEnabled={runtimeEnabled}
           />
         ) : (

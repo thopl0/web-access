@@ -31,7 +31,10 @@ export function IssueActions({
   }
 
   const spinner = pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null;
-  const muted = cur === "resolved" || cur === "ignored" || cur === "snoozed";
+  const muted = cur === "resolved" || cur === "ignored" || cur === "snoozed" || cur === "fixed";
+  const done = cur === "resolved" || cur === "fixed"; // green-toned states
+  const mutedLabel =
+    cur === "fixed" ? "Fixed (live)" : cur === "resolved" ? "Resolved" : cur === "snoozed" ? "Snoozed" : "Ignored";
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", size === "sm" && "text-xs")}>
@@ -61,15 +64,15 @@ export function IssueActions({
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-bold",
-              cur === "resolved" ? "text-green" : "text-fg-soft",
+              done ? "text-green" : "text-fg-soft",
             )}
           >
-            {cur === "resolved" ? (
+            {done ? (
               <Check className="size-4" strokeWidth={2.75} aria-hidden />
             ) : (
               <Ban className="size-4" strokeWidth={2.5} aria-hidden />
             )}
-            {cur === "resolved" ? "Resolved" : cur === "snoozed" ? "Snoozed" : "Ignored"}
+            {mutedLabel}
           </span>
           <button
             type="button"
