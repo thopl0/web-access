@@ -21,9 +21,10 @@ import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
 import { getIssuesTrend, getSitePages, pathOf, rollupByRule, siteStartHere } from "@/lib/server/report";
+import { openRuleIds } from "@/lib/server/issues";
 import { getScanDelta } from "@/lib/server/verification";
 import { explainRule } from "@/lib/explain";
-import { SEVERITY_RANK, type Severity } from "@/lib/severity";
+import { SEVERITY_RANK, emptyCounts, type Severity } from "@/lib/severity";
 import { summarizeConformance } from "@/lib/wcag";
 
 export const metadata: Metadata = { title: "Site report" };
@@ -50,12 +51,48 @@ export default async function SiteReportsPage({
   // `summary: true` loads the stored intelligent-report summary for the "Start here" card; the rest of
   // the page is unchanged. `siteStartHere` then picks the most-urgent stored summary or, failing that,
   // computes a deterministic site-wide legal-risk ranking — so the card is always populated.
-  const { pages, counts, fixesLocked } = await getSitePages(siteId, { summary: true });
-  const startHere = siteStartHere(pages);
-  const rules = rollupByRule(pages);
-  const hasPages = pages.length > 0;
-  const conformance = summarizeConformance(rules, { evaluated: hasPages });
+  const { pages: allPages, fixesLocked } = await getSitePages(siteId, { summary: true });
+  const startHere = siteStartHere(allPages);
+  const allRules = rollupByRule(allPages);
+  const hasPages = allPages.length > 0;
   const snippet = embedSnippet(await appOrigin(), site.id);
+
+  // Lifecycle-aware view: drop rules the owner has already fixed / auto-fixed / muted, so this report
+  // agrees with the Issues tab. It used to render RAW scan findings — fixed issues lingered in the list
+  // and every count was inflated (e.g. 274 "open" when only 242 / 4 types were actually open).
+  const openIds = await openRuleIds(siteId, allRules);
+  const rules = allRules.filter((r) => openIds.has(r.ruleId));
+  const pages = allPages.map((p) => {
+    const groups = p.groups.filter((g) => openIds.has(g.ruleId));
+    const c = emptyCounts();
+    for (const g of groups) {
+      const sev = g.impact as Severity | null;
+      if (sev && sev in SEVERITY_RANK) {
+        c[sev] += g.elements.length;
+        c.total += g.elements.length;
+      }
+    }
+    return { ...p, groups, counts: c };
+  });
+
+  // Open totals: `counts` = open spots by severity (drives the score / donut / severity bar); `openTypes`
+  // + `openPageCount` are the "N types of issues across M pages" headline; `openCriticalTypes` = the
+  // Critical metric.
+  const counts = emptyCounts();
+  for (const r of rules) {
+    const sev = r.impact as Severity | null;
+    if (sev && sev in SEVERITY_RANK) {
+      counts[sev] += r.totalSpots;
+      counts.total += r.totalSpots;
+    }
+  }
+  const openTypes = rules.length;
+  const affectedPages = new Set<string>();
+  for (const r of rules) for (const p of r.pages) affectedPages.add(p.url);
+  const openPageCount = affectedPages.size;
+  const openCriticalTypes = rules.filter((r) => r.impact === "critical").length;
+
+  const conformance = summarizeConformance(rules, { evaluated: hasPages });
 
   // Verification loop (plan §8.5): compare the latest re-scan against the previous one so the report
   // can CONFIRM which fixes actually worked. Only meaningful once there are scans to compare.
@@ -182,19 +219,24 @@ export default async function SiteReportsPage({
               fuller health/trend panel still lives lower down (in SiteOverview). */}
           <Panel className="mt-8">
             <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
-              <ScoreBadge counts={counts} pageCount={pages.length} />
+              <ScoreBadge counts={counts} pageCount={allPages.length} />
               <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
                 <div>
-                  <p className="font-display text-3xl font-bold tabular-nums text-fg">{counts.total}</p>
+                  <p className="font-display text-3xl font-bold tabular-nums text-fg">{openTypes}</p>
                   <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">
-                    {counts.total === 1 ? "Open issue" : "Open issues"}
+                    {openTypes === 1 ? "Open issue type" : "Open issue types"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-fg-soft">
+                    {openTypes > 0
+                      ? `Across ${openPageCount} ${openPageCount === 1 ? "page" : "pages"}`
+                      : "All clear 🎉"}
                   </p>
                 </div>
                 <div>
                   <p
-                    className={`font-display text-3xl font-bold tabular-nums ${counts.critical > 0 ? "text-pink" : "text-fg-soft"}`}
+                    className={`font-display text-3xl font-bold tabular-nums ${openCriticalTypes > 0 ? "text-pink" : "text-fg-soft"}`}
                   >
-                    {counts.critical}
+                    {openCriticalTypes}
                   </p>
                   <p className="text-xs font-bold uppercase tracking-wide text-fg-soft">Critical</p>
                 </div>

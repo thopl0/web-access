@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import type { Finding, Impact, IssueStatus } from "@web-access/shared";
 import { db, schema } from "./db";
-import { getSitePages, rollupByRule, type RulePage } from "./report";
+import { getSitePages, rollupByRule, type RulePage, type RuleRollup } from "./report";
 import { SEVERITY_ORDER, SEVERITY_RANK, emptyCounts, type Severity, type SeverityCounts } from "@/lib/severity";
 
 /**
@@ -279,6 +279,26 @@ export async function getOpenIssueOverview(
   });
 
   return { issues, total, bySite };
+}
+
+/**
+ * Which of a site's rolled-up rules are still OPEN (not fixed / auto-fixed / muted) — the SAME lifecycle
+ * logic as the inbox and `getOpenIssueOverview`, but exposed for callers that already hold the rich
+ * `RuleRollup[]` (the per-site report needs the full rollup with evidence/screenshots, which the lean
+ * `IssueRow[]` doesn't carry). The caller is responsible for the ownership check on `siteId`.
+ */
+export async function openRuleIds(siteId: string, rollups: RuleRollup[]): Promise<Set<string>> {
+  const overrides = await overridesFor([siteId]);
+  const autoFix = await autoFixRulesFor([siteId]);
+  const open = new Set<string>();
+  for (const r of rollups) {
+    const key = `${siteId}:${r.ruleId}`;
+    if (autoFix.has(key)) continue; // auto-fixed → kept patched live → never "open"
+    if (effectiveStatus(overrides.get(key), fingerprintPages(r.pages)).status === "open") {
+      open.add(r.ruleId);
+    }
+  }
+  return open;
 }
 
 export type IssueDetail = {
