@@ -83,6 +83,15 @@ async function collectTextOverImage(page: Page): Promise<TextOverImage[]> {
       if (r.width < 4 || r.height < 4) continue;
       const style = getComputedStyle(el);
       if (style.visibility === "hidden" || style.display === "none") continue;
+      // Skip decorative text: aria-hidden (not in the a11y tree) or effectively invisible via cumulative
+      // opacity (e.g. faint watermarks). Contrast on these is noise — Lighthouse ignores them too.
+      if (el.closest('[aria-hidden="true"]')) continue;
+      let cumulativeOpacity = 1;
+      for (let p: Element | null = el; p && p.nodeType === 1; p = p.parentElement) {
+        const o = parseFloat(getComputedStyle(p).opacity);
+        if (!Number.isNaN(o)) cumulativeOpacity *= o;
+      }
+      if (cumulativeOpacity < 0.1) continue;
 
       out.push({
         selector: cssPath(el),

@@ -93,8 +93,63 @@ export function mapAxeViolations(violations: AxeResult[]): Finding[] {
   return findings;
 }
 
+/** Contrast rules whose findings we re-check for decorative/invisible exemptions. */
+const CONTRAST_RULES = new Set(["color-contrast", "color-contrast-enhanced"]);
+/** Text below this cumulative (self × ancestors) opacity is effectively decorative — not a real
+ *  contrast concern (e.g. `text-white/[0.06]` watermarks). */
+const MIN_VISIBLE_OPACITY = 0.1;
+
+/**
+ * In-page: which of these selectors point at elements that shouldn't be contrast-checked — they're
+ * `aria-hidden` (self or an ancestor, so not in the accessibility tree) or effectively invisible
+ * (cumulative opacity below {@link MIN_VISIBLE_OPACITY}). axe sometimes flags such decorative text;
+ * Lighthouse ignores it, and "fixing" it does harm — so we drop those findings.
+ */
+async function contrastExemptSelectors(page: Page, selectors: string[]): Promise<Set<string>> {
+  if (selectors.length === 0) return new Set();
+  const exempt = await page.evaluate(
+    ({ sels, minOpacity }) => {
+      function cumulativeOpacity(start: Element): number {
+        let op = 1;
+        let node: Element | null = start;
+        while (node && node.nodeType === 1) {
+          const s = getComputedStyle(node);
+          if (s.display === "none" || s.visibility === "hidden") return 0;
+          const o = parseFloat(s.opacity);
+          if (!Number.isNaN(o)) op *= o;
+          node = node.parentElement;
+        }
+        return op;
+      }
+      const out: string[] = [];
+      for (const sel of sels) {
+        let el: Element | null = null;
+        try {
+          el = document.querySelector(sel);
+        } catch {
+          continue; // complex/shadow selector we can't re-query → leave the finding as-is
+        }
+        if (!el) continue;
+        if (el.closest('[aria-hidden="true"]') || cumulativeOpacity(el) < minOpacity) out.push(sel);
+      }
+      return out;
+    },
+    { sels: selectors, minOpacity: MIN_VISIBLE_OPACITY },
+  );
+  return new Set(exempt);
+}
+
 /** Tier-1: run axe-core against an already-rendered Playwright page and return normalized findings. */
 export async function runAxe(page: Page): Promise<Finding[]> {
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  return mapAxeViolations(results.violations);
+  const findings = mapAxeViolations(results.violations);
+
+  // Drop contrast findings on decorative / aria-hidden / near-invisible elements (Lighthouse skips
+  // them; flagging them is noise and previously drove harmful auto-fixes).
+  const contrastSelectors = findings
+    .filter((f) => CONTRAST_RULES.has(f.ruleId))
+    .map((f) => f.selector);
+  const exempt = await contrastExemptSelectors(page, contrastSelectors);
+  if (exempt.size === 0) return findings;
+  return findings.filter((f) => !(CONTRAST_RULES.has(f.ruleId) && exempt.has(f.selector)));
 }
