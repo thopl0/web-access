@@ -22,6 +22,7 @@ import type { TrendPoint } from "@/lib/server/report";
 export function SiteOverview({
   pages,
   siteCounts,
+  siteTypeCounts,
   pageCount,
   trend,
   found,
@@ -30,6 +31,8 @@ export function SiteOverview({
 }: {
   pages: BoardPage[];
   siteCounts: SeverityCounts;
+  /** Issue counts by severity (not spots) — drives the severity-breakdown donut. */
+  siteTypeCounts: SeverityCounts;
   pageCount: number;
   trend: TrendPoint[];
   found: number;
@@ -40,6 +43,9 @@ export function SiteOverview({
   const page = focusId ? pages.find((p) => p.id === focusId) ?? null : null;
 
   const counts = page ? page.counts : siteCounts;
+  // The donut shows the severity mix by ISSUE (so a single high-volume rule doesn't make it all
+  // "serious"); everything else (score, metric band, severity bar) stays on spot counts.
+  const breakdown = page ? page.typeCounts : siteTypeCounts;
   const scorePageCount = page ? 1 : pageCount;
 
   const metrics: Metric[] = page
@@ -143,7 +149,7 @@ export function SiteOverview({
               Severity breakdown
             </p>
             <div className="mt-4">
-              <SeverityDonut counts={counts} />
+              <SeverityDonut counts={breakdown} unitLabel="issue type" />
             </div>
           </Panel>
         </div>

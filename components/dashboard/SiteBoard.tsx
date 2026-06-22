@@ -35,6 +35,8 @@ export type BoardPage = {
   path: string;
   siteId: string;
   counts: SeverityCounts;
+  /** Issue counts by severity (not spots) — for the "severity breakdown" donut when this page is focused. */
+  typeCounts: SeverityCounts;
   shot?: { src: string; width: number; height: number };
   markers: BoardMarker[];
   issues: { ruleId: string; title: string; impact: Severity | null; count: number }[];

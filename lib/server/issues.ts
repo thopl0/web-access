@@ -191,14 +191,18 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
  * conformance / quick-wins.
  */
 export type OpenStats = {
+  /** Open offending-element spots by severity — for the score / severity bar. */
   counts: SeverityCounts;
+  /** Open ISSUE counts by severity — for the "severity breakdown" donut/chips (not dominated by a single
+   *  high-volume rule the way spot counts are). `typeCounts.total` === `types`. */
+  typeCounts: SeverityCounts;
   types: number;
   criticalTypes: number;
   pages: number;
 };
 
 export function emptyOpenStats(): OpenStats {
-  return { counts: emptyCounts(), types: 0, criticalTypes: 0, pages: 0 };
+  return { counts: emptyCounts(), typeCounts: emptyCounts(), types: 0, criticalTypes: 0, pages: 0 };
 }
 
 export async function getOpenIssueOverview(
@@ -252,6 +256,8 @@ export async function getOpenIssueOverview(
       if (sev && sev in SEVERITY_RANK) {
         stats.counts[sev] += r.totalSpots;
         stats.counts.total += r.totalSpots;
+        stats.typeCounts[sev] += 1;
+        stats.typeCounts.total += 1;
         if (sev === "critical") stats.criticalTypes += 1;
       }
       // Distinct affected pages (a collapsed dynamic-route family counts as the one entry it folds to).
@@ -265,8 +271,12 @@ export async function getOpenIssueOverview(
     bySite.set(site.id, stats);
     total.types += stats.types;
     total.criticalTypes += stats.criticalTypes;
-    for (const s of SEVERITY_ORDER) total.counts[s] += stats.counts[s];
+    for (const s of SEVERITY_ORDER) {
+      total.counts[s] += stats.counts[s];
+      total.typeCounts[s] += stats.typeCounts[s];
+    }
     total.counts.total += stats.counts.total;
+    total.typeCounts.total += stats.typeCounts.total;
   }
   total.pages = totalPages.size;
 

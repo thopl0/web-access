@@ -168,7 +168,7 @@ export default async function DashboardPage() {
                   Severity breakdown
                 </p>
                 <div className="mt-4">
-                  <SeverityDonut counts={portfolio} />
+                  <SeverityDonut counts={openStats.typeCounts} unitLabel="issue type" />
                 </div>
               </Panel>
             </div>

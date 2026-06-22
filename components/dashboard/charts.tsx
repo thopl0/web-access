@@ -40,7 +40,14 @@ const SEV_DOT: Record<(typeof SEVERITY_ORDER)[number], string> = {
   minor: "bg-[var(--color-fg-soft)]",
 };
 
-export function SeverityDonut({ counts }: { counts: SeverityCounts }) {
+export function SeverityDonut({
+  counts,
+  unitLabel = "issue",
+}: {
+  counts: SeverityCounts;
+  /** Noun for the centre total — e.g. "issue" (spots) or "issue type". Pluralised with a trailing "s". */
+  unitLabel?: string;
+}) {
   const R = 56;
   const C = 2 * Math.PI * R;
   const total = counts.total;
@@ -93,7 +100,7 @@ export function SeverityDonut({ counts }: { counts: SeverityCounts }) {
             {total}
           </span>
           <span className="text-[11px] font-bold uppercase tracking-wide text-fg-soft">
-            {total === 1 ? "issue" : "issues"}
+            {total === 1 ? unitLabel : `${unitLabel}s`}
           </span>
         </div>
       </div>

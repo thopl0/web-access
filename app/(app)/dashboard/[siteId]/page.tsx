@@ -92,6 +92,17 @@ export default async function SiteReportsPage({
   const openPageCount = affectedPages.size;
   const openCriticalTypes = rules.filter((r) => r.impact === "critical").length;
 
+  // Severity breakdown by ISSUE TYPE (one per rule), so the donut/chips aren't dominated by a single
+  // high-volume rule the way spot counts are (e.g. contrast on 156 elements). Spots stay on `counts`.
+  const typeCounts = emptyCounts();
+  for (const r of rules) {
+    const sev = r.impact as Severity | null;
+    if (sev && sev in SEVERITY_RANK) {
+      typeCounts[sev] += 1;
+      typeCounts.total += 1;
+    }
+  }
+
   const conformance = summarizeConformance(rules, { evaluated: hasPages });
 
   // Verification loop (plan §8.5): compare the latest re-scan against the previous one so the report
@@ -144,11 +155,20 @@ export default async function SiteReportsPage({
           (a.impact ? SEVERITY_RANK[a.impact] : 99) - (b.impact ? SEVERITY_RANK[b.impact] : 99) ||
           b.count - a.count,
       );
+    // Per-page issue-type counts (one per rule), so a focused page's donut also reads by type, not spots.
+    const pageTypeCounts = emptyCounts();
+    for (const i of issues) {
+      if (i.impact && i.impact in SEVERITY_RANK) {
+        pageTypeCounts[i.impact] += 1;
+        pageTypeCounts.total += 1;
+      }
+    }
     return {
       id: p.url,
       path: pathOf(p.url),
       siteId,
       counts: p.counts,
+      typeCounts: pageTypeCounts,
       ...(p.shot ? { shot: { src: p.shot.src, width: p.shot.width, height: p.shot.height } } : {}),
       markers,
       issues,
@@ -265,7 +285,7 @@ export default async function SiteReportsPage({
               fixable entry, not N repeats. SiteReport renders its own control bar + results heading,
               so the Section title here is the only "Issues" heading (no double heading). */}
           <Section title="Issues">
-            <SiteReport rules={rules} pages={pages} counts={counts} siteId={siteId} />
+            <SiteReport rules={rules} pages={pages} counts={typeCounts} siteId={siteId} />
           </Section>
 
           {/* Demoted "Your pages" board + the metric band and health/trend panel, which re-scope to a
@@ -273,6 +293,7 @@ export default async function SiteReportsPage({
           <SiteOverview
             pages={boardPages}
             siteCounts={counts}
+            siteTypeCounts={typeCounts}
             pageCount={pages.length}
             trend={trend}
             found={found}
