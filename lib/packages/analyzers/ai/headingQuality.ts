@@ -52,6 +52,16 @@ export function isWorthJudging(text: string): boolean {
   const PLACEHOLDER =
     /^(more|info|information|section\s*\d*|untitled|heading\s*\d*|title|welcome|overview|details|click here|read more|learn more|lorem ipsum|test|todo|tbd|n\/?a|new section|content)$/i;
   if (PLACEHOLDER.test(t)) return true;
+  // Questions and interrogative-led headings are inherently descriptive of their section — FAQ items
+  // like "How do I install X?" name a specific topic, so don't spend a call second-guessing them
+  // (and don't risk a false flag when the section preview is thin/collapsed, as in an accordion).
+  if (/\?\s*$/.test(t) && words.length >= 3) return false;
+  if (
+    words.length >= 3 &&
+    /^(how|what|why|when|where|who|whom|whose|which|can|could|do|does|did|is|are|was|were|should|shall|will|would|may|might)\b/i.test(t)
+  ) {
+    return false;
+  }
   // Long, multi-word headings are almost always descriptive — don't spend a call on them.
   if (words.length > DESCRIPTIVE_WORD_COUNT && t.length > LONG_HEADING_CHARS) return false;
   // Otherwise it's short/terse enough that descriptiveness is genuinely in question — judge it.
@@ -108,11 +118,31 @@ export async function collectHeadings(page: Page): Promise<HeadingQualityCandida
       const level = levelOf(el);
       if (level === null) continue;
 
-      // Section preview: text after this heading, stopping at the next heading in document order.
+      // Section preview: text after this heading, stopping at whichever comes FIRST — the next
+      // heading, or the page footer/nav. Without the footer/nav stop, a final heading (e.g. the last
+      // FAQ question in an accordion whose answer isn't in the static DOM) would absorb the global
+      // footer/navigation below it, making the judge think the heading mismatches its "section".
       const next = headings[i + 1] ?? null;
+      const FOLLOWING = 4; // Node.DOCUMENT_POSITION_FOLLOWING
+      const stoppers = Array.from(
+        document.querySelectorAll("footer, nav, [role='contentinfo'], [role='navigation']"),
+      ).filter((s) => !s.contains(el) && Boolean(el.compareDocumentPosition(s) & FOLLOWING));
+      let stopper: Element | null = null;
+      for (const s of stoppers) {
+        // Keep the EARLIEST following stopper: if the current best follows s, then s is earlier.
+        if (!stopper || stopper.compareDocumentPosition(s) & 2 /* PRECEDING */) stopper = s;
+      }
+      // Earliest of (next heading, stopper) bounds the section; otherwise the heading's own container,
+      // otherwise the body.
+      let endBefore: Element | null = next;
+      if (stopper && (!endBefore || stopper.compareDocumentPosition(endBefore) & FOLLOWING)) {
+        endBefore = stopper;
+      }
+      const container = el.closest("section, article, li, main, [role='region'], [role='listitem']");
       const range = document.createRange();
       range.setStartAfter(el);
-      if (next) range.setEndBefore(next);
+      if (endBefore) range.setEndBefore(endBefore);
+      else if (container) range.setEndAfter(container);
       else range.setEndAfter(document.body);
       const sectionPreview = clip(range.toString(), 400);
 

@@ -133,14 +133,27 @@ const SYSTEM_PROMPT =
   "brand or product name) — that is fine.\n" +
   "- uninformative-alt: the alt is a vague placeholder (\"image\", \"photo\", \"graphic\", " +
   '"untitled") that does not describe what the image shows or does.\n' +
-  '- redundant-phrasing: the alt opens with "image of" / "photo of" / "picture of" / "graphic of" ' +
-  "(screen readers already announce it as an image).\n" +
+  '- redundant-phrasing: the alt OPENS with a redundant image-announcing lead-in — "image of" / ' +
+  '"photo of" / "picture of" / "graphic of" / "screenshot of" / "logo of" / "icon of" (screen ' +
+  "readers already announce it as an image). ONLY the leading announcement is redundant. Do NOT flag " +
+  'a TRAILING descriptor that distinguishes this image from others (e.g. "… font preview", ' +
+  '"… diagram", "… logo", "… thumbnail", "… chart") — those carry real, distinguishing meaning and ' +
+  "must stay.\n" +
   "- ok: the alt text is a plausibly useful description, OR you lack enough text to judge.\n" +
   "Be conservative — only flag clear problems. Do NOT guess about visual accuracy (you can't see " +
   "the image). Also rate your confidence that the problem is real and a screen-reader user would " +
   'agree: "high" = obvious/unambiguous, "medium" = likely but some doubt, "low" = a guess. When you ' +
   'answer ok, use "high". Reply ONLY with JSON: {"issue":"...","confidence":"high|medium|low",' +
   '"reason":"..."} — reason is one plain sentence (empty when ok).';
+
+/**
+ * A genuinely redundant image-announcing LEAD-IN at the very start of the alt — the only thing the
+ * `redundant-phrasing` rule should ever fire on. Matches "image of", "a photo of", "picture:",
+ * "screenshot showing", "logo of", etc. Does NOT match a trailing descriptor like "ITC Avant Garde
+ * font preview", so meaningful distinguishing words are never stripped.
+ */
+const REDUNDANT_LEAD_IN =
+  /^\s*(an?\s+)?(image|images|photo|photos|photograph|picture|pictures|pic|graphic|graphics|icon|logo|screenshot|drawing|illustration|figure|banner)\b\s*(of|showing|depicting|that shows|with|:)/i;
 
 const ISSUE_META: Record<
   Exclude<Verdict["issue"], "ok">,
@@ -178,6 +191,11 @@ export async function judgeAltText(img: ImageCandidate): Promise<Finding | null>
   if (verdict.issue === "ok") return null;
   const meta = ISSUE_META[verdict.issue];
   if (!meta) return null; // unrecognised label from the model — ignore defensively
+  // Deterministic guard: "redundant-phrasing" is, by definition, a redundant image-announcing LEAD-IN.
+  // The model sometimes over-applies it to a meaningful trailing descriptor (e.g. "… font preview",
+  // which distinguishes a preview from a charmap). Only honour the flag when the alt actually OPENS
+  // with such a phrase — otherwise drop it, so we never strip distinguishing words.
+  if (verdict.issue === "redundant-phrasing" && !REDUNDANT_LEAD_IN.test(img.alt ?? "")) return null;
   // Abstention gate: a flag the model isn't sure enough about is dropped, not shown (see gate.ts).
   if (!meetsConfidence(parseConfidence(verdict.confidence))) return null;
 
