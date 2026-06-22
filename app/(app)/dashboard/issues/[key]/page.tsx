@@ -16,7 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { AutoFixToggle } from "@/components/dashboard/AutoFixToggle";
 import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
-import { getIssueDetail } from "@/lib/server/issues";
+import { getIssueDetail, getLiveFixContext, isElementLiveFixed } from "@/lib/server/issues";
 import type { IssueElement, PageShot, RulePage } from "@/lib/server/report";
 import { buildAiFixPrompt } from "@/lib/aiFixPrompt";
 import { explainRule } from "@/lib/explain";
@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
 type Instance = { path: string; el: IssueElement; shot?: PageShot | undefined };
 
 /** Pull only the serializable bits an element needs for the client/evidence UI. */
-function toSpotElement(el: IssueElement, shot?: PageShot | undefined): SpotElement {
+function toSpotElement(el: IssueElement, shot?: PageShot | undefined, appliedLive = false): SpotElement {
   return {
     selector: el.selector,
     htmlSnippet: el.htmlSnippet,
@@ -43,6 +43,7 @@ function toSpotElement(el: IssueElement, shot?: PageShot | undefined): SpotEleme
     ...(el.explanation ? { explanation: el.explanation } : {}),
     ...(el.fix ? { fix: el.fix } : {}),
     ...(el.urls ? { urls: el.urls } : {}),
+    ...(appliedLive ? { appliedLive: true } : {}),
   };
 }
 
@@ -155,11 +156,18 @@ export default async function IssueDetailPage({
   const backHref = backToSite ? `/dashboard/${issue.siteId}/issues` : "/dashboard/issues";
   const backLabel = backToSite ? `Back to ${issue.siteName} issues` : "Back to issues";
 
+  // Which spots are already covered by an enabled live remediation — so we render them "Applied live"
+  // (not a re-prompt) and don't count them as open. Same coverage test as the report + Issues tab.
+  const liveFix = await getLiveFixContext(issue.siteId);
+  const isApplied = (el: IssueElement) => isElementLiveFixed(el.selector, el.fix, liveFix);
+
   // Flatten every offending element across pages, carrying its page's shot.
   const instances: Instance[] = issue.pages.flatMap((p: RulePage) =>
     p.elements.map((el) => ({ path: p.path, el, shot: p.shot })),
   );
-  const totalSpots = instances.length;
+  // Open spots = not yet patched live; applied ones still render in the list, marked "Applied live".
+  const appliedSpots = instances.filter((i) => isApplied(i.el)).length;
+  const totalSpots = instances.length - appliedSpots;
 
   // AI-builder prompt (unchanged contract): every affected element.
   const occurrences = instances.map((i) => ({
@@ -206,7 +214,7 @@ export default async function IssueDetailPage({
         count,
         pagePaths: [...paths],
         extraPages,
-        example: toSpotElement(canonical.el, canonical.shot),
+        example: toSpotElement(canonical.el, canonical.shot, isApplied(canonical.el)),
       } satisfies SpotPattern;
     })
     // Most-recurring patterns first — the highest-leverage "fix once" wins.
@@ -218,7 +226,7 @@ export default async function IssueDetailPage({
     path: p.path,
     grouped: p.grouped,
     pageCount: p.pageCount,
-    elements: p.elements.map((el) => toSpotElement(el, p.shot)),
+    elements: p.elements.map((el) => toSpotElement(el, p.shot, isApplied(el))),
   }));
 
   // --- Canonical example, pinned at the top (the single best across the issue). ---
@@ -226,14 +234,16 @@ export default async function IssueDetailPage({
   // "Apply as live fix" control whenever the issue has one (otherwise an applyable spot can hide
   // deep in the list). Among applyable spots — or all spots when none is — pick the richest evidence.
   const applyable = instances.filter(
-    (i) => i.el.fix?.attributePatch && i.el.fix.attributePatch.length > 0,
+    (i) =>
+      !isApplied(i.el) &&
+      ((i.el.fix?.attributePatch?.length ?? 0) > 0 || (i.el.fix?.cssPatch?.length ?? 0) > 0),
   );
   const hero = applyable.length
     ? bestOf(applyable)
     : instances.length
       ? bestOf(instances)
       : null;
-  const heroSpot = hero ? toSpotElement(hero.el, hero.shot) : null;
+  const heroSpot = hero ? toSpotElement(hero.el, hero.shot, isApplied(hero.el)) : null;
 
   // Every distinct safe patch that can be applied live right now (one per selector+attr, skipping
   // placeholder values that still need a human). This is the payload for the one-click "apply to all".
@@ -241,6 +251,7 @@ export default async function IssueDetailPage({
   const applyablePatches: { selector: string; attr: string; value: string }[] = [];
   const seenPatch = new Set<string>();
   for (const i of instances) {
+    if (isApplied(i.el)) continue; // already patched live — not part of "apply the rest"
     for (const p of i.el.fix?.attributePatch ?? []) {
       if (isPlaceholderValue(p.value)) continue;
       const k = `${i.el.selector}\n${p.attr}`;
@@ -259,6 +270,7 @@ export default async function IssueDetailPage({
   const seenSuggestion = new Set<string>();
   let reviewSuggestionCount = 0;
   for (const i of instances) {
+    if (isApplied(i.el)) continue;
     for (const p of i.el.fix?.attributePatch ?? []) {
       const k = `${i.el.selector}\n${p.attr}`;
       if (seenSuggestion.has(k)) continue;
@@ -274,6 +286,7 @@ export default async function IssueDetailPage({
   const applyableCssPatches: { selector: string; prop: string; value: string }[] = [];
   const seenCss = new Set<string>();
   for (const i of instances) {
+    if (isApplied(i.el)) continue;
     for (const p of i.el.fix?.cssPatch ?? []) {
       const k = `${i.el.selector}\n${p.prop}`;
       if (seenCss.has(k)) continue;
@@ -345,6 +358,9 @@ export default async function IssueDetailPage({
           {totalSpots} {totalSpots === 1 ? "spot" : "spots"}
         </span>{" "}
         across {pages.length} {pages.length === 1 ? "page" : "pages"}
+        {appliedSpots > 0 ? (
+          <span className="text-green"> · {appliedSpots} applied live</span>
+        ) : null}
         {wcagChips.map((w) => (
           <span key={w.sc}> · WCAG {w.sc} ({w.info.level})</span>
         ))}
@@ -414,6 +430,7 @@ export default async function IssueDetailPage({
                     ruleId={issue.ruleId}
                     runtimeEnabled={runtimeEnabled}
                     cssEnabled={cssEnabled}
+                    appliedLive={heroSpot.appliedLive}
                   />
                   {/* Bulk path: apply the same kind of fix to every other matching spot in one click.
                       When some spots are AI-judgment placeholders that would otherwise force per-box
@@ -484,7 +501,7 @@ export default async function IssueDetailPage({
 
       {/* All spots, grouped and navigable (own heading + controls). */}
       <div className="mt-10">
-        {totalSpots > 0 ? (
+        {instances.length > 0 ? (
           <IssueSpots
             patterns={patterns}
             pages={pages}

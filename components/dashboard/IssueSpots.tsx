@@ -42,6 +42,8 @@ export type SpotElement = {
   };
   /** Concrete pages this element family spans (set when the page is collapsed). */
   urls?: string[];
+  /** This spot's fix is already applied as an enabled live remediation — render "Applied live". */
+  appliedLive?: boolean;
 };
 
 /** A recurring element pattern — same selector + markup — across the whole site. */
@@ -138,6 +140,7 @@ function ApplyPatch({
   patch,
   needsReview,
   runtimeEnabled,
+  alreadyApplied = false,
 }: {
   siteId: string;
   /** The issue's rule, so applying can auto-mark the issue "fixed" once every spot is covered. */
@@ -147,11 +150,13 @@ function ApplyPatch({
   needsReview: boolean;
   /** When false, applying first turns on the site's runtime-remediation master toggle (Pro-gated). */
   runtimeEnabled: boolean;
+  /** This spot already has an enabled live remediation — render "Applied live", don't re-prompt. */
+  alreadyApplied?: boolean;
 }) {
   const inputId = useId();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [applied, setApplied] = useState(false);
+  const [applied, setApplied] = useState(alreadyApplied);
   const [error, setError] = useState<string | null>(null);
   // Placeholder fixes ship a "TODO:" stand-in — the owner must supply the real value.
   const placeholder = needsReview;
@@ -265,6 +270,7 @@ function ApplyCss({
   selector,
   patches,
   cssEnabled,
+  alreadyApplied = false,
 }: {
   siteId: string;
   ruleId?: string;
@@ -272,10 +278,12 @@ function ApplyCss({
   patches: { prop: string; value: string }[];
   /** Whether the site has already opted into experimental CSS fixes. */
   cssEnabled: boolean;
+  /** This spot already has an enabled live CSS remediation — render "Applied live", don't re-prompt. */
+  alreadyApplied?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [applied, setApplied] = useState(false);
+  const [applied, setApplied] = useState(alreadyApplied);
   const [error, setError] = useState<string | null>(null);
 
   const apply = () => {
@@ -355,6 +363,7 @@ export function FixBlock({
   ruleId,
   runtimeEnabled,
   cssEnabled = false,
+  appliedLive = false,
 }: {
   fix: NonNullable<SpotElement["fix"]>;
   selector: string;
@@ -363,6 +372,8 @@ export function FixBlock({
   runtimeEnabled: boolean;
   /** Whether the site opted into experimental CSS fixes (drives the CSS apply control's label). */
   cssEnabled?: boolean;
+  /** This spot's fix is already applied as an enabled live remediation — show "Applied live". */
+  appliedLive?: boolean;
 }) {
   const canApply = Boolean(fix.attributePatch && fix.attributePatch.length > 0);
   const hasCss = Boolean(fix.cssPatch && fix.cssPatch.length > 0);
@@ -416,6 +427,7 @@ export function FixBlock({
               patch={patch}
               needsReview={review}
               runtimeEnabled={runtimeEnabled}
+              alreadyApplied={appliedLive}
             />
           ))
         : hasCss
@@ -443,6 +455,7 @@ export function FixBlock({
           selector={selector}
           patches={fix.cssPatch!}
           cssEnabled={cssEnabled}
+          alreadyApplied={appliedLive}
         />
       ) : null}
     </div>
@@ -718,7 +731,7 @@ function PatternCard({
       {ex.explanation ? <AiExplanation explanation={ex.explanation} /> : null}
 
       {ex.fix ? (
-        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} />
+        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} appliedLive={ex.appliedLive} />
       ) : (
         <NoFixHint siteId={siteId} />
       )}
@@ -773,7 +786,7 @@ function PageCard({
             />
             {el.explanation ? <AiExplanation explanation={el.explanation} /> : null}
             {el.fix ? (
-              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} />
+              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} appliedLive={el.appliedLive} />
             ) : (
               <NoFixHint siteId={siteId} />
             )}
