@@ -335,8 +335,9 @@ export default async function SiteReportsPage({
               below the issues so it's an explorer, not a scroll-wall. */}
           <SiteOverview
             pages={boardPages}
-            siteCounts={counts}
+            siteTypeCounts={typeCounts}
             pageCount={pages.length}
+            affectedPageCount={openPageCount}
             lastScanLabel={lastScan ? fmtDay(lastScan.slice(0, 10)) : "—"}
           />
 

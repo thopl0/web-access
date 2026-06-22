@@ -15,50 +15,55 @@ import type { SeverityCounts } from "@/lib/severity";
  */
 export function SiteOverview({
   pages,
-  siteCounts,
+  siteTypeCounts,
   pageCount,
+  affectedPageCount,
   lastScanLabel,
 }: {
   pages: BoardPage[];
-  siteCounts: SeverityCounts;
+  /** Open issues by severity (TYPE counts) — keeps this band consistent with the headline + donut. */
+  siteTypeCounts: SeverityCounts;
   pageCount: number;
+  /** Distinct pages with at least one open issue (the headline's "across N pages"). */
+  affectedPageCount: number;
   lastScanLabel: string;
 }) {
   const [focusId, setFocusId] = useState<string | null>(null);
   const page = focusId ? pages.find((p) => p.id === focusId) ?? null : null;
 
-  const counts = page ? page.counts : siteCounts;
-
+  // Site-level band is board CONTEXT (pages scanned / affected / open types) so it agrees with the
+  // headline up top — never the raw spot total, which read as "242 open issues" and contradicted the
+  // "4 issue types" headline. A focused page shows that page's own spot counts ("on this page").
   const metrics: Metric[] = page
     ? [
-        { label: "Open issues", value: counts.total, hint: "On this page" },
+        { label: "Issues here", value: page.counts.total, hint: "On this page" },
         {
           label: "Critical",
-          value: counts.critical,
-          ...(counts.critical > 0 ? { severity: "critical" as const } : {}),
-          hint: counts.critical > 0 ? "Need urgent fixes" : "None",
+          value: page.counts.critical,
+          ...(page.counts.critical > 0 ? { severity: "critical" as const } : {}),
+          hint: page.counts.critical > 0 ? "Need urgent fixes" : "None",
         },
         {
           label: "Serious",
-          value: counts.serious,
-          ...(counts.serious > 0 ? { severity: "serious" as const } : {}),
-          hint: counts.serious > 0 ? "High impact" : "None",
+          value: page.counts.serious,
+          ...(page.counts.serious > 0 ? { severity: "serious" as const } : {}),
+          hint: page.counts.serious > 0 ? "High impact" : "None",
         },
-        { label: "Accessibility score", value: `${healthScore(counts, 1)}`, hint: "Out of 100" },
+        { label: "Accessibility score", value: `${healthScore(page.counts, 1)}`, hint: "Out of 100" },
       ]
     : [
+        { label: "Pages scanned", value: pageCount, hint: "Auto-scanned" },
         {
-          label: "Open issues",
-          value: counts.total,
-          hint: counts.total > 0 ? `Across ${pageCount} ${pageCount === 1 ? "page" : "pages"}` : "All clear 🎉",
+          label: "Pages with issues",
+          value: affectedPageCount,
+          hint: affectedPageCount > 0 ? `of ${pageCount}` : "None 🎉",
         },
         {
-          label: "Critical",
-          value: counts.critical,
-          ...(counts.critical > 0 ? { severity: "critical" as const } : {}),
-          hint: counts.critical > 0 ? "Need urgent fixes" : "None open",
+          label: siteTypeCounts.total === 1 ? "Open issue type" : "Open issue types",
+          value: siteTypeCounts.total,
+          ...(siteTypeCounts.critical > 0 ? { severity: "critical" as const } : {}),
+          hint: siteTypeCounts.critical > 0 ? `${siteTypeCounts.critical} critical` : "0 critical",
         },
-        { label: "Pages", value: pageCount, hint: "Auto-scanned" },
         { label: "Last scan", value: lastScanLabel },
       ];
 
