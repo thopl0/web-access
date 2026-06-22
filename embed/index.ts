@@ -191,11 +191,34 @@
               continue; // bad selector — skip, never throw
             }
             nodes.forEach((node) => {
+              let applied = false;
               for (const p of entry.patches) {
                 if (!p || typeof p.attr !== "string" || typeof p.value !== "string") continue;
                 if (!SAFE_ATTRS[p.attr]) continue; // re-check the safe allowlist client-side
                 try {
                   node.setAttribute(p.attr, p.value);
+                  applied = true;
+                } catch {
+                  /* never throw into host */
+                }
+              }
+              // Mark each element we actually patched with an HTML comment, for transparency and
+              // easy auditing of what the live fix touched. Inserted once (re-runs on SPA nav skip
+              // it when our comment is already the element's previous sibling).
+              if (applied) {
+                try {
+                  const prev = node.previousSibling;
+                  const marked =
+                    !!prev &&
+                    prev.nodeType === 8 /* Node.COMMENT_NODE */ &&
+                    typeof (prev as Comment).data === "string" &&
+                    (prev as Comment).data.indexOf("fixed by ") !== -1;
+                  if (!marked && node.parentNode) {
+                    node.parentNode.insertBefore(
+                      document.createComment(` fixed by ${cfg!.ingest} `),
+                      node,
+                    );
+                  }
                 } catch {
                   /* never throw into host */
                 }
