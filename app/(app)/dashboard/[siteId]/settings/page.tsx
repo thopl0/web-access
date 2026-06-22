@@ -14,11 +14,13 @@ import {
 } from "@/components/dashboard/SiteSettingsForms";
 import { ShareToggle } from "@/components/dashboard/ShareExport";
 import { RuntimeFixSettings } from "@/components/dashboard/RuntimeFixSettings";
-import { listRemediations } from "@/app/actions/remediation";
+import { AutoFixList } from "@/components/dashboard/AutoFixList";
+import { listRemediations, listRuleAutofix } from "@/app/actions/remediation";
 import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
+import { explainRule } from "@/lib/explain";
 
 export const metadata: Metadata = { title: "Site settings" };
 export const dynamic = "force-dynamic";
@@ -61,6 +63,10 @@ export default async function SiteSettingsPage({
   const origin = await appOrigin();
   const snippet = embedSnippet(origin, site.id);
   const remediations = await listRemediations(site.id);
+  const autoFixRules = (await listRuleAutofix(site.id)).map((r) => ({
+    ruleId: r.ruleId,
+    title: explainRule(r.ruleId)?.title ?? r.ruleId,
+  }));
 
   return (
     <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8">
@@ -129,6 +135,13 @@ export default async function SiteSettingsPage({
             initialEnabled={site.runtimeRemediation}
             remediations={remediations}
           />
+        </Section>
+
+        <Section
+          title="Auto-fix issue types going forward"
+          description="Issue types you've chosen to fix automatically. New occurrences are patched live on every scan (safe attributes only), so these stop coming back in your inbox."
+        >
+          <AutoFixList siteId={site.id} rules={autoFixRules} />
         </Section>
 
         <div className="rounded-[14px] border-[3px] border-pink/40 p-5 sm:p-6">

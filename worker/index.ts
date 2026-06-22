@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { chromium, type Browser, type Page } from "playwright";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   CRAWL_QUEUE,
   MONITOR_QUEUE,
@@ -33,6 +33,11 @@ const connection = getConnection();
 /** Pull the alt VALUE back out of a vision `aiFix.after` snippet (`<img alt="…" src="…">`) so it can
  *  be stored as a runtime-applicable {attr:"alt"} patch. Returns "" if no alt is parseable — the
  *  caller then drops the attributePatch (the before→after markup still carries the fix). */
+/** A leftover deterministic placeholder ("TODO: …") rather than a real value — never auto-applied. */
+function isPlaceholderValue(value: string): boolean {
+  return /^\s*todo\b/i.test(value);
+}
+
 function aiFixAlt(after: string): string {
   const m = after.match(/\balt=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/);
   if (!m) return "";
@@ -336,6 +341,36 @@ const worker = new Worker<RenderJob>(
         if (rows.length > 0) {
           await db.insert(schema.fixSuggestions).values(rows).onConflictDoNothing();
           fixed = rows.length;
+        }
+
+        // Auto-fix going forward: for rules the owner has opted into, auto-approve THIS scan's safe,
+        // non-placeholder attribute patches as live remediations — so recurring occurrences are
+        // patched without per-occurrence review. Plan-gated; CSS is never auto-applied (safe attrs
+        // only). The dashboard separately treats auto-fix rules as "Fixed (live)" so they don't clog.
+        if (ent.runtimeRemediation && rows.length > 0) {
+          const autoRules = await db
+            .select({ ruleId: schema.ruleAutofix.ruleId })
+            .from(schema.ruleAutofix)
+            .where(and(eq(schema.ruleAutofix.siteId, siteId), eq(schema.ruleAutofix.enabled, true)));
+          const autoSet = new Set(autoRules.map((r) => r.ruleId));
+          if (autoSet.size > 0) {
+            const findingById = new Map<number, Finding>();
+            ids.forEach((idRow, i) => findingById.set(idRow.id, findings[i]!));
+            for (const row of rows) {
+              const finding = findingById.get(row.findingId);
+              if (!finding || !autoSet.has(finding.ruleId) || !row.attributePatch) continue;
+              for (const patch of row.attributePatch) {
+                if (!isSafeRemediationAttr(patch.attr) || isPlaceholderValue(patch.value)) continue;
+                await db
+                  .insert(schema.remediations)
+                  .values({ siteId, selector: finding.selector, attr: patch.attr, value: patch.value, enabled: true })
+                  .onConflictDoUpdate({
+                    target: [schema.remediations.siteId, schema.remediations.selector, schema.remediations.attr],
+                    set: { value: patch.value, enabled: true },
+                  });
+              }
+            }
+          }
         }
       } catch (err) {
         console.error(`scan ${scanId} fix suggestion failed:`, err);

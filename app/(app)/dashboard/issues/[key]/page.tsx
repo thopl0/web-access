@@ -11,8 +11,9 @@ import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { ApplyAllFixes, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
+import { AutoFixToggle } from "@/components/dashboard/AutoFixToggle";
 import { verifySession } from "@/lib/server/dal";
 import { db, schema } from "@/lib/server/db";
 import { getIssueDetail } from "@/lib/server/issues";
@@ -136,6 +137,16 @@ export default async function IssueDetailPage({
       .limit(1)
   )[0];
   const runtimeEnabled = Boolean(siteRow?.rr);
+
+  // Is this rule already set to auto-fix going forward? (drives the toggle's initial state).
+  const autofixRow = (
+    await db
+      .select({ enabled: schema.ruleAutofix.enabled })
+      .from(schema.ruleAutofix)
+      .where(and(eq(schema.ruleAutofix.siteId, issue.siteId), eq(schema.ruleAutofix.ruleId, issue.ruleId)))
+      .limit(1)
+  )[0];
+  const autoFixEnabled = Boolean(autofixRow?.enabled);
 
   // Back link: when arriving from a per-site issues list (and the id matches this issue's site),
   // return there; otherwise fall back to the global inbox.
@@ -380,6 +391,14 @@ export default async function IssueDetailPage({
                         runtimeEnabled={runtimeEnabled}
                       />
                     </div>
+                  ) : null}
+                  {/* Stop this issue type from clogging the inbox: auto-fix its occurrences going forward. */}
+                  {applyablePatches.length > 0 ? (
+                    <AutoFixToggle
+                      siteId={issue.siteId}
+                      ruleId={issue.ruleId}
+                      initialEnabled={autoFixEnabled}
+                    />
                   ) : null}
                 </div>
               ) : null}

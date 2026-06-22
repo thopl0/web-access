@@ -74,6 +74,20 @@ async function ownedSites(userId: string, siteId?: string) {
     .where(where);
 }
 
+/**
+ * The set of `${siteId}:${ruleId}` an owner has opted to auto-fix going forward. An auto-fixed rule
+ * reads as "fixed" everywhere (its occurrences are kept patched live by the worker), so it never
+ * clogs the open inbox — even as new occurrences appear on later scans.
+ */
+async function autoFixRulesFor(siteIds: string[]): Promise<Set<string>> {
+  if (siteIds.length === 0) return new Set();
+  const rows = await db
+    .select({ siteId: schema.ruleAutofix.siteId, ruleId: schema.ruleAutofix.ruleId })
+    .from(schema.ruleAutofix)
+    .where(and(inArray(schema.ruleAutofix.siteId, siteIds), eq(schema.ruleAutofix.enabled, true)));
+  return new Set(rows.map((r) => `${r.siteId}:${r.ruleId}`));
+}
+
 async function overridesFor(siteIds: string[]) {
   if (siteIds.length === 0) return new Map<string, { status: IssueStatus; fingerprint: string | null }>();
   const rows = await db
@@ -105,6 +119,7 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
   if (sites.length === 0) return [];
 
   const overrides = await overridesFor(sites.map((s) => s.id));
+  const autoFix = await autoFixRulesFor(sites.map((s) => s.id));
   const rows: IssueRow[] = [];
 
   for (const site of sites) {
@@ -116,7 +131,12 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
     for (const r of rollups) {
       const key = `${site.id}:${r.ruleId}`;
       const fingerprint = fingerprintPages(r.pages);
-      const { status, reopened } = effectiveStatus(overrides.get(key), fingerprint);
+      const eff = effectiveStatus(overrides.get(key), fingerprint);
+      // An auto-fixed rule is kept patched live by the worker, so it reads as "fixed" regardless of
+      // any stored override or occurrence change — it never resurfaces in the open inbox.
+      const autofixed = autoFix.has(key);
+      const status = autofixed ? "fixed" : eff.status;
+      const reopened = autofixed ? false : eff.reopened;
 
       rows.push({
         key,
@@ -187,7 +207,10 @@ export async function getIssueDetail(userId: string, key: string): Promise<Issue
 
   const overrides = await overridesFor([siteId]);
   const fingerprint = fingerprintPages(rollup.pages);
-  const { status, reopened } = effectiveStatus(overrides.get(key), fingerprint);
+  const eff = effectiveStatus(overrides.get(key), fingerprint);
+  const autofixed = (await autoFixRulesFor([siteId])).has(key);
+  const status = autofixed ? "fixed" : eff.status;
+  const reopened = autofixed ? false : eff.reopened;
 
   return {
     key,

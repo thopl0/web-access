@@ -222,6 +222,88 @@ export async function applyFixesToIssue(
   return { ok: true, applied, skipped, fixed };
 }
 
+/** Every distinct safe patch for an issue right now, derived server-side from its findings' fixes. */
+async function issuePatches(userId: string, siteId: string, ruleId: string): Promise<PatchInput[]> {
+  const detail = await getIssueDetail(userId, `${siteId}:${ruleId}`);
+  if (!detail) return [];
+  const out: PatchInput[] = [];
+  const seen = new Set<string>();
+  for (const page of detail.pages) {
+    for (const el of page.elements) {
+      for (const p of el.fix?.attributePatch ?? []) {
+        const k = `${el.selector}\n${p.attr}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ selector: el.selector, attr: p.attr, value: p.value });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Turn "auto-fix this kind of issue going forward" on/off for a site. Enabling also (a) flips on the
+ * runtime master toggle and (b) applies the rule's current safe spots right now, so it takes effect
+ * immediately rather than only on the next scan; future scans are auto-applied by the worker. The
+ * dashboard then treats every issue of this rule as "Fixed (live)" so the type stops clogging the
+ * inbox. Safe attributes only — CSS fixes are never auto-applied. Ownership- and plan-gated.
+ */
+export async function setRuleAutofix(
+  siteId: string,
+  ruleId: string,
+  enabled: boolean,
+): Promise<RemediationActionResult> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { ok: false, error: "Site not found." };
+  if (enabled && !(await getUserEntitlements(userId)).runtimeRemediation) {
+    return { ok: false, error: "Upgrade to Pro to auto-fix issues." };
+  }
+
+  await db
+    .insert(schema.ruleAutofix)
+    .values({ siteId, ruleId, enabled })
+    .onConflictDoUpdate({
+      target: [schema.ruleAutofix.siteId, schema.ruleAutofix.ruleId],
+      set: { enabled },
+    });
+
+  if (enabled) {
+    if (!site.runtimeRemediation) {
+      await db.update(schema.sites).set({ runtimeRemediation: true }).where(eq(schema.sites.id, siteId));
+    }
+    for (const raw of await issuePatches(userId, siteId, ruleId)) {
+      const clean = cleanPatch(raw);
+      if (!clean) continue;
+      await db
+        .insert(schema.remediations)
+        .values({ siteId, selector: clean.selector, attr: clean.attr, value: clean.value, enabled: true })
+        .onConflictDoUpdate({
+          target: [schema.remediations.siteId, schema.remediations.selector, schema.remediations.attr],
+          set: { value: clean.value, enabled: true },
+        });
+    }
+  }
+
+  revalidateAfterApply(siteId, ruleId);
+  return { ok: true };
+}
+
+/** One auto-fixed rule, for the settings list. */
+export type RuleAutofixRow = { ruleId: string; enabled: boolean };
+
+/** List the rules a site auto-fixes going forward (enabled only). Ownership-checked. */
+export async function listRuleAutofix(siteId: string): Promise<RuleAutofixRow[]> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return [];
+  return db
+    .select({ ruleId: schema.ruleAutofix.ruleId, enabled: schema.ruleAutofix.enabled })
+    .from(schema.ruleAutofix)
+    .where(and(eq(schema.ruleAutofix.siteId, siteId), eq(schema.ruleAutofix.enabled, true)))
+    .orderBy(asc(schema.ruleAutofix.ruleId));
+}
+
 /** Enable/disable one approved remediation without deleting it (a quick pause). Ownership-checked. */
 export async function setRemediationEnabled(
   id: number,

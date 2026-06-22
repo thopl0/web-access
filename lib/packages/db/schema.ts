@@ -266,6 +266,30 @@ export const remediations = pgTable(
 );
 
 /**
+ * Per-rule "auto-fix this type going forward" preference. When enabled for a (site, rule), the worker
+ * auto-approves that rule's SAFE non-visual attribute fixes on every future scan (so recurring issues
+ * of that type get patched live without per-occurrence review) and the dashboard treats the issue as
+ * "Fixed (live)" so it stops clogging the open inbox. Safe-attr fixes only — CSS is never auto-applied.
+ * Keyed by (siteId, ruleId) like the report's rule rollup; cascades when the site is deleted.
+ */
+export const ruleAutofix = pgTable(
+  "rule_autofix",
+  {
+    id: serial("id").primaryKey(),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    ruleId: text("rule_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqRuleAutofix: uniqueIndex("uniq_rule_autofix").on(t.siteId, t.ruleId),
+    bySite: index("rule_autofix_by_site").on(t.siteId),
+  }),
+);
+
+/**
  * One row of the per-scan "start here" legal-risk triage list. Mirrors `TriageItem` in
  * `analyzers/ai/reportSummary.ts` (the single source of truth) — inlined here, rather than imported,
  * so the db package stays a dependency-light leaf (the analyzers barrel pulls in playwright + the AI
