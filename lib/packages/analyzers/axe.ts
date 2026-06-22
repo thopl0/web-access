@@ -2,37 +2,23 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "playwright";
 import type { NodeResult, Result as AxeResult } from "axe-core";
 import type { CssPatch, Finding, Impact } from "@web-access/shared";
-import { compliantTextColor, parseColor, toHex } from "./color";
-
-/** Pull the contrast check's color data off an axe node (it lives under `any`/`all`/`none`). */
-function contrastData(node: NodeResult): { fg?: string; bg?: string; expected?: number } | null {
-  for (const check of [...(node.any ?? []), ...(node.all ?? []), ...(node.none ?? [])]) {
-    const data = check.data as { fgColor?: string; bgColor?: string; expectedContrastRatio?: string } | undefined;
-    if (data && (data.fgColor || data.bgColor)) {
-      const expected = data.expectedContrastRatio ? parseFloat(data.expectedContrastRatio) : undefined;
-      return { fg: data.fgColor, bg: data.bgColor, expected };
-    }
-  }
-  return null;
-}
 
 /**
  * EXPERIMENTAL CSS fix for the visual rules we can fix mechanically:
- *   - color-contrast: nudge the text `color` to the nearest value that meets the required ratio over
- *     the SAME background axe measured (so it stays close to the original).
  *   - target-size: give the control a minimum 24×24 hit area (WCAG 2.5.8 AA), as inline-block so the
  *     min size actually takes effect.
  * Returns undefined when we don't have the data to compute a safe fix.
+ *
+ * color-contrast is DELIBERATELY excluded: a static `color` override can't be applied safely from a
+ * scan. It ignores the element's `opacity`, fires on decorative / `aria-hidden` / near-invisible text
+ * (e.g. `text-white/[0.06]` watermarks) that shouldn't be contrast-checked, and trusts axe's measured
+ * background — which is wrong on themed/dark sites. Applied with `!important`, it turned intended
+ * decoration into visible LOW-contrast text, i.e. it CREATED the failures it claimed to fix (verified:
+ * Lighthouse flagged our patched elements; turning the patches off cleared them). Contrast stays a
+ * read-only suggestion in the report, never a live patch, until we can verify a fix against the
+ * rendered page (opacity + actual background).
  */
 function cssFixFor(ruleId: string, node: NodeResult): CssPatch[] | undefined {
-  if (ruleId === "color-contrast" || ruleId === "color-contrast-enhanced") {
-    const d = contrastData(node);
-    const fg = d?.fg ? parseColor(d.fg) : null;
-    const bg = d?.bg ? parseColor(d.bg) : null;
-    if (!fg || !bg) return undefined;
-    const ratio = d?.expected && d.expected > 1 ? d.expected : 4.5;
-    return [{ prop: "color", value: toHex(compliantTextColor(fg, bg, ratio)) }];
-  }
   if (ruleId === "target-size") {
     return [
       { prop: "min-width", value: "24px" },
