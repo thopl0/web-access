@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
-import type { AttributePatch, Finding, Impact, ScanReport, ScanStatus } from "@web-access/shared";
+import type { AttributePatch, CssPatch, Finding, Impact, ScanReport, ScanStatus } from "@web-access/shared";
 import { db, schema } from "./db";
 import { SEVERITY_RANK, emptyCounts } from "@/lib/severity";
 import type { Severity, SeverityCounts } from "@/lib/severity";
@@ -148,6 +148,8 @@ export type ElementFix = {
   note?: string;
   /** Structured safe-attribute form of this fix (Phase C). Present => eligible to apply as a live fix. */
   attributePatch?: AttributePatch[];
+  /** Experimental structured CSS form (Phase D). Present => eligible to apply as a live CSS fix. */
+  cssPatch?: CssPatch[];
 };
 
 /** Where an element sits on the page, in the full-page screenshot's coordinate space (CSS px).
@@ -554,6 +556,9 @@ export async function getSitePages(
                     ...(fixRow.note ? { note: fixRow.note } : {}),
                     ...(fixRow.attributePatch && fixRow.attributePatch.length
                       ? { attributePatch: fixRow.attributePatch }
+                      : {}),
+                    ...(fixRow.cssPatch && fixRow.cssPatch.length
+                      ? { cssPatch: fixRow.cssPatch }
                       : {}),
                   },
                 }

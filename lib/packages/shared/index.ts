@@ -18,6 +18,38 @@ export type FindingSource = z.infer<typeof FindingSource>;
 export const Impact = z.enum(["minor", "moderate", "serious", "critical"]).nullable();
 export type Impact = z.infer<typeof Impact>;
 
+/**
+ * The curated CSS properties an EXPERIMENTAL "CSS fix" may set on the live DOM (Phase D). Unlike the
+ * safe non-visual attribute patches, these DO change how the page looks — that's the point (they fix
+ * visual issues like low contrast and small tap targets) — so they're opt-in per site, clearly flagged
+ * experimental ("may affect your design"), and never auto-applied. Kept deliberately small: only the
+ * properties our contrast/target-size fixers emit. Enforced everywhere a CSS patch is accepted,
+ * stored, served, or applied (approval action, manifest builder, endpoint, embed).
+ */
+export const SAFE_CSS_PROPERTIES = [
+  "color",
+  "background-color",
+  "min-width",
+  "min-height",
+  "padding",
+  "display",
+  "outline",
+  "outline-offset",
+] as const;
+export type SafeCssProperty = (typeof SAFE_CSS_PROPERTIES)[number];
+
+/** Is `prop` in the experimental CSS-fix allowlist? The single gate every layer calls. */
+export function isSafeCssProperty(prop: string): prop is SafeCssProperty {
+  return (SAFE_CSS_PROPERTIES as readonly string[]).includes(prop);
+}
+
+/** One concrete CSS patch — set `prop` to `value` on an element (applied via style.setProperty). */
+export const CssPatch = z.object({
+  prop: z.enum(SAFE_CSS_PROPERTIES),
+  value: z.string(),
+});
+export type CssPatch = z.infer<typeof CssPatch>;
+
 /** A single accessibility problem, normalized across all analyzers. */
 export const Finding = z.object({
   /** Stable rule id, e.g. "image-alt" (axe) or "reading-order" (geometry). */
@@ -49,6 +81,13 @@ export const Finding = z.object({
    * compiling.
    */
   aiFix: z.object({ after: z.string(), note: z.string().optional() }).optional(),
+  /**
+   * TRANSIENT, NEVER-PERSISTED: an experimental CSS fix the analyzer computed while it had the data
+   * in hand (e.g. axe's color-contrast exposes the fg/bg colors, so we can compute a compliant color;
+   * target-size implies a minimum tap size). Consumed by the worker into `fixSuggestions.cssPatch`,
+   * then stripped before the finding row is inserted (no such column on `findings`).
+   */
+  cssFix: z.array(CssPatch).optional(),
 });
 export type Finding = z.infer<typeof Finding>;
 
@@ -125,6 +164,8 @@ export const FixSuggestion = z.object({
   note: z.string().optional(),
   /** Structured safe-attribute form of this fix, when it's a non-visual attribute set (Phase C). */
   attributePatch: z.array(AttributePatch).optional(),
+  /** Experimental structured CSS form (Phase D) — present for visual fixes (contrast/target-size). */
+  cssPatch: z.array(CssPatch).optional(),
 });
 export type FixSuggestion = z.infer<typeof FixSuggestion>;
 
@@ -138,6 +179,8 @@ export type FixSuggestion = z.infer<typeof FixSuggestion>;
 export const RemediationEntry = z.object({
   selector: z.string(),
   patches: z.array(AttributePatch),
+  /** Experimental CSS patches for this selector — served only when the site opts into CSS fixes. */
+  css: z.array(CssPatch).default([]),
 });
 export type RemediationEntry = z.infer<typeof RemediationEntry>;
 

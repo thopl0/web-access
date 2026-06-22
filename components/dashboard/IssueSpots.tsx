@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { Button } from "@/components/ui/Button";
-import { applyFixesToIssue, approveRemediation, setRuntimeRemediation, type PatchInput } from "@/app/actions/remediation";
+import { applyCssFixesToIssue, applyFixesToIssue, approveRemediation, setRuntimeRemediation, type CssPatchInput, type PatchInput } from "@/app/actions/remediation";
 
 /**
  * Serializable description of one offending element instance. The page builds
@@ -37,6 +37,8 @@ export type SpotElement = {
     note?: string;
     /** Structured safe-attribute form. Present => eligible to apply as a live fix. */
     attributePatch?: { attr: string; value: string }[];
+    /** Experimental structured CSS form. Present => eligible to apply as a live CSS fix. */
+    cssPatch?: { prop: string; value: string }[];
   };
   /** Concrete pages this element family spans (set when the page is collapsed). */
   urls?: string[];
@@ -238,6 +240,82 @@ function ApplyPatch({
   );
 }
 
+/**
+ * EXPERIMENTAL "apply as live CSS fix" control for a spot's CSS patches (contrast / target-size). CSS
+ * changes the page's appearance, so it's clearly flagged experimental; applying turns on the CSS
+ * opt-in for the site (the labelled button is the owner's consent).
+ */
+function ApplyCss({
+  siteId,
+  ruleId,
+  selector,
+  patches,
+  cssEnabled,
+}: {
+  siteId: string;
+  ruleId?: string;
+  selector: string;
+  patches: { prop: string; value: string }[];
+  /** Whether the site has already opted into experimental CSS fixes. */
+  cssEnabled: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [applied, setApplied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = () => {
+    setError(null);
+    startTransition(async () => {
+      const input: CssPatchInput[] = patches.map((p) => ({ selector, prop: p.prop, value: p.value }));
+      const res = await applyCssFixesToIssue(siteId, ruleId ?? "", input);
+      if (res.ok) {
+        setApplied(true);
+        router.refresh();
+      } else {
+        setError(res.error ?? "Couldn't apply this CSS fix.");
+      }
+    });
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-yellow/40 bg-yellow/5 p-3">
+      <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-[color-mix(in_srgb,var(--color-fg)_75%,var(--yellow))]">
+        <AlertTriangle className="size-3.5" aria-hidden strokeWidth={2.5} />
+        Apply as live CSS fix
+        <span className="rounded-full bg-yellow/25 px-2 py-0.5 text-[10px] normal-case text-[color-mix(in_srgb,var(--color-fg)_75%,var(--yellow))]">
+          Experimental
+        </span>
+      </p>
+      <p className="mt-1 text-xs text-fg-soft">
+        Restyles the element on your live site to fix this. CSS changes can affect your design — review
+        the result.{cssEnabled ? "" : " Applying turns on experimental CSS fixes for this site."}
+      </p>
+      <pre className="inset mt-2 overflow-x-auto p-2 text-xs text-fg">
+        <code>{patches.map((p) => `${p.prop}: ${p.value};`).join("\n")}</code>
+      </pre>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {applied ? (
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-green" role="status">
+            <Check className="size-4" aria-hidden strokeWidth={2.5} />
+            Applied live
+          </span>
+        ) : (
+          <Button type="button" variant="outline" size="sm" onClick={apply} disabled={pending} className="!border-yellow/60">
+            {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            {pending ? "Applying…" : cssEnabled ? "Apply CSS fix" : "Enable CSS fixes & apply"}
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <p role="alert" aria-live="assertive" className="mt-2 text-sm font-bold text-pink">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** No concrete fix could be generated for this spot — point to the AI builder prompt instead. */
 function NoFixHint({ siteId }: { siteId: string }) {
   return (
@@ -262,14 +340,18 @@ export function FixBlock({
   siteId,
   ruleId,
   runtimeEnabled,
+  cssEnabled = false,
 }: {
   fix: NonNullable<SpotElement["fix"]>;
   selector: string;
   siteId: string;
   ruleId?: string;
   runtimeEnabled: boolean;
+  /** Whether the site opted into experimental CSS fixes (drives the CSS apply control's label). */
+  cssEnabled?: boolean;
 }) {
   const canApply = Boolean(fix.attributePatch && fix.attributePatch.length > 0);
+  const hasCss = Boolean(fix.cssPatch && fix.cssPatch.length > 0);
   // AI fixes are judgment calls; needsReview covers those plus deterministic placeholder inserts.
   const review = fix.kind === "ai" || fix.needsReview;
   return (
@@ -310,32 +392,45 @@ export function FixBlock({
 
       {/* Phase C: apply safe attribute patches live. When runtime is off, the apply control enables it
           first (Pro-gated) so the first live fix is one click — no detour to Settings. */}
-      {canApply ? (
-        fix.attributePatch!.map((patch, i) => (
-          <ApplyPatch
-            key={`${patch.attr}-${i}`}
-            siteId={siteId}
-            ruleId={ruleId}
-            selector={selector}
-            patch={patch}
-            needsReview={review}
-            runtimeEnabled={runtimeEnabled}
-          />
-        ))
-      ) : (
-        // No safe attribute patch (e.g. color-contrast, heading-order): can't be applied live.
-        <p className="mt-3 text-xs text-fg-soft">
-          This fix can&apos;t be auto-applied to your live site — apply it in your source (copy above), or
-          use the{" "}
-          <Link
-            href={`/dashboard/${siteId}/reports`}
-            className="font-bold text-link underline underline-offset-2"
-          >
-            AI builder prompt
-          </Link>
-          .
-        </p>
-      )}
+      {canApply
+        ? fix.attributePatch!.map((patch, i) => (
+            <ApplyPatch
+              key={`${patch.attr}-${i}`}
+              siteId={siteId}
+              ruleId={ruleId}
+              selector={selector}
+              patch={patch}
+              needsReview={review}
+              runtimeEnabled={runtimeEnabled}
+            />
+          ))
+        : hasCss
+          ? null // a CSS fix is offered below instead of the "can't auto-apply" hint
+          : (
+              // No machine-applicable fix (safe attr or CSS): apply it in source.
+              <p className="mt-3 text-xs text-fg-soft">
+                This fix can&apos;t be auto-applied to your live site — apply it in your source (copy above), or
+                use the{" "}
+                <Link
+                  href={`/dashboard/${siteId}/reports`}
+                  className="font-bold text-link underline underline-offset-2"
+                >
+                  AI builder prompt
+                </Link>
+                .
+              </p>
+            )}
+
+      {/* Experimental CSS fix (contrast / target-size): a visual patch the embed applies live. */}
+      {hasCss ? (
+        <ApplyCss
+          siteId={siteId}
+          ruleId={ruleId}
+          selector={selector}
+          patches={fix.cssPatch!}
+          cssEnabled={cssEnabled}
+        />
+      ) : null}
     </div>
   );
 }
@@ -410,6 +505,72 @@ export function ApplyAllFixes({
   );
 }
 
+/**
+ * Bulk "apply the experimental CSS fix to every matching spot" — each spot keeps its own computed
+ * value (e.g. a per-element contrast-compliant color). Mirrors ApplyAllFixes but for CSS patches.
+ */
+export function ApplyAllCss({
+  siteId,
+  ruleId,
+  patches,
+  cssEnabled,
+}: {
+  siteId: string;
+  ruleId: string;
+  patches: CssPatchInput[];
+  cssEnabled: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ applied: number; fixed: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await applyCssFixesToIssue(siteId, ruleId, patches);
+      if (res.ok) {
+        setResult({ applied: res.applied ?? 0, fixed: Boolean(res.fixed) });
+        router.refresh();
+      } else {
+        setError(res.error ?? "Couldn't apply these CSS fixes.");
+      }
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-yellow/40 bg-yellow/5 p-3">
+      <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-[color-mix(in_srgb,var(--color-fg)_75%,var(--yellow))]">
+        <AlertTriangle className="size-3.5" aria-hidden strokeWidth={2.5} />
+        Fix every spot with CSS
+        <span className="rounded-full bg-yellow/25 px-2 py-0.5 text-[10px] normal-case">Experimental</span>
+      </p>
+      <p className="mt-1 text-xs text-fg-soft">
+        Restyles all {patches.length} spots live to fix this — each with its own computed value. CSS
+        changes can affect your design.{cssEnabled ? "" : " Applying turns on experimental CSS fixes."}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {result ? (
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold text-green" role="status">
+            <Check className="size-4" aria-hidden strokeWidth={2.5} />
+            Applied {result.applied} live{result.fixed ? " · issue fixed" : ""}
+          </span>
+        ) : (
+          <Button type="button" variant="outline" size="sm" onClick={apply} disabled={pending} className="!border-yellow/60">
+            {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <AlertTriangle className="size-4" aria-hidden strokeWidth={2.5} />}
+            {pending ? "Applying…" : `Apply CSS fix to all ${patches.length} spots`}
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <p role="alert" aria-live="assertive" className="mt-2 text-sm font-bold text-pink">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function PageList({ paths, extra }: { paths: string[]; extra: number }) {
   const SHOWN = 5;
   const shown = paths.slice(0, SHOWN);
@@ -429,12 +590,14 @@ function PatternCard({
   siteId,
   ruleId,
   runtimeEnabled,
+  cssEnabled,
 }: {
   pattern: SpotPattern;
   idBase: string;
   siteId: string;
   ruleId?: string;
   runtimeEnabled: boolean;
+  cssEnabled: boolean;
 }) {
   const ex = pattern.example;
   return (
@@ -464,7 +627,7 @@ function PatternCard({
       {ex.explanation ? <AiExplanation explanation={ex.explanation} /> : null}
 
       {ex.fix ? (
-        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} />
+        <FixBlock fix={ex.fix} selector={ex.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} />
       ) : (
         <NoFixHint siteId={siteId} />
       )}
@@ -482,12 +645,14 @@ function PageCard({
   siteId,
   ruleId,
   runtimeEnabled,
+  cssEnabled,
 }: {
   page: SpotPage;
   idBase: string;
   siteId: string;
   ruleId?: string;
   runtimeEnabled: boolean;
+  cssEnabled: boolean;
 }) {
   return (
     <article
@@ -517,7 +682,7 @@ function PageCard({
             />
             {el.explanation ? <AiExplanation explanation={el.explanation} /> : null}
             {el.fix ? (
-              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} />
+              <FixBlock fix={el.fix} selector={el.selector} siteId={siteId} ruleId={ruleId} runtimeEnabled={runtimeEnabled} cssEnabled={cssEnabled} />
             ) : (
               <NoFixHint siteId={siteId} />
             )}
@@ -536,6 +701,7 @@ export function IssueSpots({
   siteId,
   ruleId,
   runtimeEnabled,
+  cssEnabled = false,
 }: {
   patterns: SpotPattern[];
   pages: SpotPage[];
@@ -543,6 +709,7 @@ export function IssueSpots({
   siteId: string;
   ruleId?: string;
   runtimeEnabled: boolean;
+  cssEnabled?: boolean;
 }) {
   const [view, setView] = useState<View>("pattern");
   const [shownPatterns, setShownPatterns] = useState(PAGES_SHOWN);
@@ -644,6 +811,7 @@ export function IssueSpots({
                   siteId={siteId}
                   ruleId={ruleId}
                   runtimeEnabled={runtimeEnabled}
+                  cssEnabled={cssEnabled}
                 />
               ))
             : pages.slice(0, shown).map((p, i) => (
@@ -654,6 +822,7 @@ export function IssueSpots({
                   siteId={siteId}
                   ruleId={ruleId}
                   runtimeEnabled={runtimeEnabled}
+                  cssEnabled={cssEnabled}
                 />
               ))}
 

@@ -14,6 +14,7 @@ import {
   DEFAULT_SCAN_CONFIG,
   DEFAULT_STATEMENT_CONFIG,
   type AttributePatch,
+  type CssPatch,
   type ScanConfig,
   type SiteStatus,
   type StatementConfig,
@@ -87,6 +88,10 @@ export const sites = pgTable(
     // role/title). Default false: nothing is ever served or applied until the owner turns this on
     // AND approves individual fixes. The source fix stays primary; this is a temporary patch.
     runtimeRemediation: boolean("runtime_remediation").notNull().default(false),
+    // EXPERIMENTAL opt-in for Phase D CSS fixes: when true, approved CSS patches (contrast/target-size)
+    // are also served + applied live. Default false because these change the page's APPEARANCE and may
+    // affect the design — gated separately from the non-visual runtime remediation above.
+    cssRemediation: boolean("css_remediation").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -231,6 +236,10 @@ export const fixSuggestions = pgTable("fix_suggestions", {
   // {attr,value} restricted to SAFE_REMEDIATION_ATTRS (see @web-access/shared). Nullable: present
   // only when the fix is a simple non-visual attribute set (lang/alt/role/aria-*); absent otherwise.
   attributePatch: jsonb("attribute_patch").$type<AttributePatch[]>(),
+  // Experimental structured CSS form (Phase D) — present for visual fixes (contrast/target-size).
+  // Nullable; only set when the fixer could compute safe CSS, and only ever applied if the owner
+  // opts into experimental CSS fixes (sites.cssRemediation).
+  cssPatch: jsonb("css_patch").$type<CssPatch[]>(),
 });
 
 /**
@@ -253,6 +262,10 @@ export const remediations = pgTable(
       .notNull()
       .references(() => sites.id, { onDelete: "cascade" }),
     selector: text("selector").notNull(),
+    // "attr" (a safe non-visual attribute, default) or "css" (an experimental CSS property). For css
+    // rows, `attr` holds the CSS property name and `value` its value — the curated allowlists don't
+    // overlap, so (selector, attr) stays a safe unique key across both kinds.
+    kind: text("kind").notNull().default("attr"),
     attr: text("attr").notNull(),
     value: text("value").notNull(),
     enabled: boolean("enabled").notNull().default(true),

@@ -200,6 +200,7 @@ const worker = new Worker<RenderJob>(
       // the `findings` table has no such column, so strip it before the insert and keep an
       // index-aligned record so the "Concrete fixes" block can store it directly below.
       const aiFixByIdx = findings.map((f) => f.aiFix ?? null);
+      const cssFixByIdx = findings.map((f) => f.cssFix ?? null);
       let ids: { id: number }[] = [];
       if (findings.length > 0) {
         ids = await db
@@ -208,6 +209,7 @@ const worker = new Worker<RenderJob>(
             findings.map((f) => {
               const row = { ...f };
               delete row.aiFix; // transient — kept in aiFixByIdx, not a findings column
+              delete row.cssFix; // transient — kept in cssFixByIdx, not a findings column
               return { scanId, ...row };
             }),
           )
@@ -335,6 +337,25 @@ const worker = new Worker<RenderJob>(
             needsReview: s.needsReview,
             note: s.note ?? null,
             attributePatch: s.attributePatch ?? null,
+          });
+        });
+
+        // (3) Experimental CSS fixes (contrast / target-size): each finding carries a computed
+        // cssPatch. Stored with the element markup unchanged (the fix is CSS, not markup) so the UI
+        // can render + apply it as a separate, opt-in experimental control.
+        const fixedFindingIds = new Set(rows.map((r) => r.findingId));
+        findings.forEach((f, i) => {
+          const css = cssFixByIdx[i];
+          if (!css || !ids[i] || fixedFindingIds.has(ids[i]!.id)) return;
+          rows.push({
+            findingId: ids[i]!.id,
+            kind: "ai",
+            before: f.htmlSnippet,
+            after: f.htmlSnippet,
+            needsReview: true,
+            note: "Experimental CSS fix — may affect your site's design. Review before enabling.",
+            attributePatch: null,
+            cssPatch: css,
           });
         });
 

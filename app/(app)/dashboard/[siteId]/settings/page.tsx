@@ -14,6 +14,7 @@ import {
 } from "@/components/dashboard/SiteSettingsForms";
 import { ShareToggle } from "@/components/dashboard/ShareExport";
 import { RuntimeFixSettings } from "@/components/dashboard/RuntimeFixSettings";
+import { CssFixToggle } from "@/components/dashboard/CssFixToggle";
 import { AutoFixList } from "@/components/dashboard/AutoFixList";
 import { listRemediations, listRuleAutofix } from "@/app/actions/remediation";
 import { verifySession } from "@/lib/server/dal";
@@ -135,6 +136,13 @@ export default async function SiteSettingsPage({
             initialEnabled={site.runtimeRemediation}
             remediations={remediations}
           />
+        </Section>
+
+        <Section
+          title="Experimental CSS fixes"
+          description="Let approved fixes restyle your live site to address visual issues like color contrast and small tap targets. These change how your pages look."
+        >
+          <CssFixToggle siteId={site.id} initialEnabled={site.cssRemediation} />
         </Section>
 
         <Section

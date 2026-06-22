@@ -38,6 +38,61 @@ export function parseRgb(s: string): RGB | null {
   return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]) };
 }
 
+/** Parse a hex (`#rgb`/`#rrggbb`) or `rgb()` color string → RGB, or null. */
+export function parseColor(s: string): RGB | null {
+  const t = s.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(t);
+  if (hex) {
+    const h = hex[1]!;
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    return { r: parseInt(full.slice(0, 2), 16), g: parseInt(full.slice(2, 4), 16), b: parseInt(full.slice(4, 6), 16) };
+  }
+  return parseRgb(t);
+}
+
+/** Format an RGB as a `#rrggbb` hex string (channels clamped + rounded). */
+export function toHex({ r, g, b }: RGB): string {
+  const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+function lerp(a: RGB, b: RGB, t: number): RGB {
+  return { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t };
+}
+
+/** Smallest blend factor t∈[0,1] s.t. lerp(fg→target, t) meets `ratio` against bg, or null if even t=1 can't. */
+function minBlendToRatio(fg: RGB, bg: RGB, target: RGB, ratio: number): number | null {
+  if (contrastRatio(fg, bg) >= ratio) return 0;
+  if (contrastRatio(target, bg) < ratio) return null;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (contrastRatio(lerp(fg, target, mid), bg) >= ratio) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/**
+ * Nudge a foreground color toward black or white — whichever gets there with the LEAST visual change —
+ * until it meets `ratio` against `bg`. Used to compute an experimental contrast fix that stays as close
+ * as possible to the owner's original color. Falls back to the higher-contrast extreme if neither
+ * direction can reach the ratio (e.g. a mid-gray background where the target is very high).
+ */
+export function compliantTextColor(fg: RGB, bg: RGB, ratio: number): RGB {
+  const black: RGB = { r: 0, g: 0, b: 0 };
+  const white: RGB = { r: 255, g: 255, b: 255 };
+  const tDark = minBlendToRatio(fg, bg, black, ratio);
+  const tLight = minBlendToRatio(fg, bg, white, ratio);
+  if (tDark === null && tLight === null) {
+    return contrastRatio(black, bg) >= contrastRatio(white, bg) ? black : white;
+  }
+  if (tDark === null) return lerp(fg, white, tLight!);
+  if (tLight === null) return lerp(fg, black, tDark!);
+  return tDark <= tLight ? lerp(fg, black, tDark) : lerp(fg, white, tLight);
+}
+
 /** Manhattan distance between two colors (0–765); used to drop glyph pixels near the text color. */
 function colorDistance(a: RGB, b: RGB): number {
   return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);

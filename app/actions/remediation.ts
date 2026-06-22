@@ -3,7 +3,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
-import { isSafeRemediationAttr } from "@web-access/shared";
+import { isSafeCssProperty, isSafeRemediationAttr } from "@web-access/shared";
 import { db, schema } from "@/lib/server/db";
 import { verifySession } from "@/lib/server/dal";
 import { getUserEntitlements } from "@/lib/server/entitlements";
@@ -82,21 +82,38 @@ async function markIssueFixedIfFullyCovered(
   const detail = await getIssueDetail(userId, key);
   if (!detail) return false;
 
-  // Currently-enabled remediations for this site, keyed by `selector\nattr`.
+  // Whether experimental CSS fixes are actually being served for this site — a css patch only counts
+  // toward coverage when it's switched on (otherwise the fix isn't live).
+  const cssOn = Boolean(
+    (
+      await db
+        .select({ cssRemediation: schema.sites.cssRemediation })
+        .from(schema.sites)
+        .where(eq(schema.sites.id, siteId))
+        .limit(1)
+    )[0]?.cssRemediation,
+  );
+
+  // Currently-enabled remediations for this site, keyed by `kind\nselector\nattr`.
   const enabledRows = await db
-    .select({ selector: schema.remediations.selector, attr: schema.remediations.attr })
+    .select({ kind: schema.remediations.kind, selector: schema.remediations.selector, attr: schema.remediations.attr })
     .from(schema.remediations)
     .where(and(eq(schema.remediations.siteId, siteId), eq(schema.remediations.enabled, true)));
-  const enabled = new Set(enabledRows.map((r) => `${r.selector}\n${r.attr}`));
+  const enabled = new Set(enabledRows.map((r) => `${r.kind}\n${r.selector}\n${r.attr}`));
 
   for (const page of detail.pages) {
     for (const el of page.elements) {
-      const patches = el.fix?.attributePatch;
-      // No safe attribute patch for this spot → can't be auto-fixed → issue isn't fully fixed.
-      if (!patches || patches.length === 0) return false;
-      for (const p of patches) {
+      const attrPatches = el.fix?.attributePatch ?? [];
+      const cssPatches = el.fix?.cssPatch ?? [];
+      // No machine-applicable fix for this spot → can't be auto-fixed → issue isn't fully fixed.
+      if (attrPatches.length === 0 && cssPatches.length === 0) return false;
+      for (const p of attrPatches) {
         if (isPlaceholder(p.value)) return false; // owner still has to supply a real value
-        if (!enabled.has(`${el.selector}\n${p.attr}`)) return false; // not applied yet
+        if (!enabled.has(`attr\n${el.selector}\n${p.attr}`)) return false; // not applied yet
+      }
+      for (const p of cssPatches) {
+        if (!cssOn) return false; // css fix exists but isn't being served (opt-in off)
+        if (!enabled.has(`css\n${el.selector}\n${p.prop}`)) return false; // not applied yet
       }
     }
   }
@@ -220,6 +237,91 @@ export async function applyFixesToIssue(
   const fixed = await markIssueFixedIfFullyCovered(userId, siteId, ruleId);
   revalidateAfterApply(siteId, ruleId);
   return { ok: true, applied, skipped, fixed };
+}
+
+/** One experimental CSS patch the owner is applying (one spot's CSS-property fix). */
+export type CssPatchInput = { selector: string; prop: string; value: string };
+
+/** Validate one CSS patch against the safe-property allowlist. Returns the cleaned patch or null. */
+function cleanCssPatch(input: CssPatchInput): { selector: string; prop: string; value: string } | null {
+  const selector = input.selector.trim();
+  const prop = input.prop.trim();
+  const value = input.value.trim();
+  if (!selector || !isSafeCssProperty(prop) || !value) return null;
+  return { selector, prop, value };
+}
+
+/**
+ * Apply experimental CSS fixes for an issue (contrast / target-size) to the live site. CSS fixes
+ * change the page's APPEARANCE, so applying also flips on the experimental opt-in
+ * (`sites.cssRemediation`) — the clearly-labelled control is the owner's consent. The issue is marked
+ * "Fixed (live)" once fully covered. Ownership- and plan-gated; CSS properties are allowlisted.
+ */
+export async function applyCssFixesToIssue(
+  siteId: string,
+  ruleId: string,
+  patches: CssPatchInput[],
+): Promise<RemediationActionResult & { applied?: number; skipped?: number; fixed?: boolean }> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { ok: false, error: "Site not found." };
+  if (!(await getUserEntitlements(userId)).runtimeRemediation) {
+    return { ok: false, error: "Upgrade to Pro to apply live fixes." };
+  }
+
+  // CSS is visual + experimental: applying it is consent to turn on both the runtime master and the
+  // experimental CSS opt-in (so the patch actually serves).
+  const updates: Partial<{ runtimeRemediation: boolean; cssRemediation: boolean }> = {};
+  if (!site.runtimeRemediation) updates.runtimeRemediation = true;
+  if (!site.cssRemediation) updates.cssRemediation = true;
+  if (Object.keys(updates).length > 0) {
+    await db.update(schema.sites).set(updates).where(eq(schema.sites.id, siteId));
+  }
+
+  let applied = 0;
+  let skipped = 0;
+  for (const raw of patches) {
+    const clean = cleanCssPatch(raw);
+    if (!clean) {
+      skipped++;
+      continue;
+    }
+    await db
+      .insert(schema.remediations)
+      .values({ siteId, selector: clean.selector, kind: "css", attr: clean.prop, value: clean.value, enabled: true })
+      .onConflictDoUpdate({
+        target: [schema.remediations.siteId, schema.remediations.selector, schema.remediations.attr],
+        set: { kind: "css", value: clean.value, enabled: true },
+      });
+    applied++;
+  }
+
+  if (applied === 0) {
+    return { ok: false, error: "Nothing to apply — no valid CSS fix for these spots.", applied, skipped };
+  }
+
+  const fixed = await markIssueFixedIfFullyCovered(userId, siteId, ruleId);
+  revalidateAfterApply(siteId, ruleId);
+  return { ok: true, applied, skipped, fixed };
+}
+
+/**
+ * Master opt-in for EXPERIMENTAL CSS fixes — separate from the non-visual runtime toggle because CSS
+ * changes the page's appearance and may affect the design. Turning it on also ensures the runtime
+ * master is on (nothing serves otherwise). Always allowed to turn OFF. Ownership- and plan-gated.
+ */
+export async function setCssRemediation(siteId: string, enabled: boolean): Promise<RemediationActionResult> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { ok: false, error: "Site not found." };
+  if (enabled && !(await getUserEntitlements(userId)).runtimeRemediation) {
+    return { ok: false, error: "Upgrade to Pro to enable live fixes." };
+  }
+  const set: Partial<{ cssRemediation: boolean; runtimeRemediation: boolean }> = { cssRemediation: enabled };
+  if (enabled && !site.runtimeRemediation) set.runtimeRemediation = true;
+  await db.update(schema.sites).set(set).where(eq(schema.sites.id, siteId));
+  revalidatePath(`/dashboard/${siteId}/settings`);
+  return { ok: true };
 }
 
 /** Every distinct safe patch for an issue right now, derived server-side from its findings' fixes. */

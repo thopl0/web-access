@@ -26,7 +26,11 @@ export { buildManifest } from "./remediation-manifest";
  */
 export async function getRemediationManifest(siteId: string): Promise<RemediationManifest> {
   const site = await db
-    .select({ runtimeRemediation: schema.sites.runtimeRemediation, ownerId: schema.sites.ownerId })
+    .select({
+      runtimeRemediation: schema.sites.runtimeRemediation,
+      cssRemediation: schema.sites.cssRemediation,
+      ownerId: schema.sites.ownerId,
+    })
     .from(schema.sites)
     .where(eq(schema.sites.id, siteId))
     .limit(1);
@@ -43,6 +47,7 @@ export async function getRemediationManifest(siteId: string): Promise<Remediatio
   const rows = await db
     .select({
       selector: schema.remediations.selector,
+      kind: schema.remediations.kind,
       attr: schema.remediations.attr,
       value: schema.remediations.value,
       enabled: schema.remediations.enabled,
@@ -51,5 +56,7 @@ export async function getRemediationManifest(siteId: string): Promise<Remediatio
     .where(and(eq(schema.remediations.siteId, siteId), eq(schema.remediations.enabled, true)))
     .orderBy(asc(schema.remediations.selector), asc(schema.remediations.attr));
 
-  return buildManifest(rows);
+  // CSS patches are experimental and only served when the site explicitly opted in (separately from
+  // the non-visual runtime toggle), since they change the page's appearance.
+  return buildManifest(rows, Boolean(site[0]!.cssRemediation));
 }

@@ -1,7 +1,47 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "playwright";
-import type { Result as AxeResult } from "axe-core";
-import type { Finding, Impact } from "@web-access/shared";
+import type { NodeResult, Result as AxeResult } from "axe-core";
+import type { CssPatch, Finding, Impact } from "@web-access/shared";
+import { compliantTextColor, parseColor, toHex } from "./color";
+
+/** Pull the contrast check's color data off an axe node (it lives under `any`/`all`/`none`). */
+function contrastData(node: NodeResult): { fg?: string; bg?: string; expected?: number } | null {
+  for (const check of [...(node.any ?? []), ...(node.all ?? []), ...(node.none ?? [])]) {
+    const data = check.data as { fgColor?: string; bgColor?: string; expectedContrastRatio?: string } | undefined;
+    if (data && (data.fgColor || data.bgColor)) {
+      const expected = data.expectedContrastRatio ? parseFloat(data.expectedContrastRatio) : undefined;
+      return { fg: data.fgColor, bg: data.bgColor, expected };
+    }
+  }
+  return null;
+}
+
+/**
+ * EXPERIMENTAL CSS fix for the visual rules we can fix mechanically:
+ *   - color-contrast: nudge the text `color` to the nearest value that meets the required ratio over
+ *     the SAME background axe measured (so it stays close to the original).
+ *   - target-size: give the control a minimum 24×24 hit area (WCAG 2.5.8 AA), as inline-block so the
+ *     min size actually takes effect.
+ * Returns undefined when we don't have the data to compute a safe fix.
+ */
+function cssFixFor(ruleId: string, node: NodeResult): CssPatch[] | undefined {
+  if (ruleId === "color-contrast" || ruleId === "color-contrast-enhanced") {
+    const d = contrastData(node);
+    const fg = d?.fg ? parseColor(d.fg) : null;
+    const bg = d?.bg ? parseColor(d.bg) : null;
+    if (!fg || !bg) return undefined;
+    const ratio = d?.expected && d.expected > 1 ? d.expected : 4.5;
+    return [{ prop: "color", value: toHex(compliantTextColor(fg, bg, ratio)) }];
+  }
+  if (ruleId === "target-size") {
+    return [
+      { prop: "min-width", value: "24px" },
+      { prop: "min-height", value: "24px" },
+      { prop: "display", value: "inline-block" },
+    ];
+  }
+  return undefined;
+}
 
 /** WCAG A/AA tags we ask axe to evaluate (2.0 / 2.1 / 2.2). */
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -49,6 +89,7 @@ export function mapAxeViolations(violations: AxeResult[]): Finding[] {
   for (const v of violations) {
     const wcag = extractWcag(v.tags);
     for (const node of v.nodes) {
+      const cssFix = cssFixFor(v.id, node);
       findings.push({
         ruleId: v.id,
         source: "axe",
@@ -59,6 +100,7 @@ export function mapAxeViolations(violations: AxeResult[]): Finding[] {
         htmlSnippet: truncate(node.html),
         message: v.help,
         ...(v.helpUrl ? { helpUrl: v.helpUrl } : {}),
+        ...(cssFix ? { cssFix } : {}),
       });
     }
   }

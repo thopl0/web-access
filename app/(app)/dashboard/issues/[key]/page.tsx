@@ -10,7 +10,7 @@ import { IssueActions } from "@/components/dashboard/IssueActions";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
-import { ApplyAllFixes, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
+import { ApplyAllCss, ApplyAllFixes, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
 import { and, eq } from "drizzle-orm";
 
 import { AutoFixToggle } from "@/components/dashboard/AutoFixToggle";
@@ -131,12 +131,13 @@ export default async function IssueDetailPage({
   // Whether this site has runtime remediation turned on — gates the "apply live" control.
   const siteRow = (
     await db
-      .select({ rr: schema.sites.runtimeRemediation })
+      .select({ rr: schema.sites.runtimeRemediation, css: schema.sites.cssRemediation })
       .from(schema.sites)
       .where(eq(schema.sites.id, issue.siteId))
       .limit(1)
   )[0];
   const runtimeEnabled = Boolean(siteRow?.rr);
+  const cssEnabled = Boolean(siteRow?.css);
 
   // Is this rule already set to auto-fix going forward? (drives the toggle's initial state).
   const autofixRow = (
@@ -249,6 +250,18 @@ export default async function IssueDetailPage({
     }
   }
 
+  // Experimental CSS patches that can be applied live (contrast/target-size), one per selector+prop.
+  const applyableCssPatches: { selector: string; prop: string; value: string }[] = [];
+  const seenCss = new Set<string>();
+  for (const i of instances) {
+    for (const p of i.el.fix?.cssPatch ?? []) {
+      const k = `${i.el.selector}\n${p.prop}`;
+      if (seenCss.has(k)) continue;
+      seenCss.add(k);
+      applyableCssPatches.push({ selector: i.el.selector, prop: p.prop, value: p.value });
+    }
+  }
+
   // Meta strip facts.
   const effort = effortOf(issue.ruleId);
   const wcagChips = issue.wcag
@@ -286,7 +299,7 @@ export default async function IssueDetailPage({
           <div className="flex flex-wrap items-center gap-2">
             {/* Jump straight to the live-fix control — it sits below the fold in "The fix" panel, so
                 surface a header CTA whenever this issue actually has an applyable patch. */}
-            {applyable.length > 0 ? (
+            {applyable.length > 0 || applyableCssPatches.length > 0 ? (
               <a
                 href="#apply-live-fix"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-green/50 bg-green/5 px-3 py-1.5 text-sm font-bold text-green no-underline transition-colors hover:bg-green/10"
@@ -380,6 +393,7 @@ export default async function IssueDetailPage({
                     siteId={issue.siteId}
                     ruleId={issue.ruleId}
                     runtimeEnabled={runtimeEnabled}
+                    cssEnabled={cssEnabled}
                   />
                   {/* Bulk path: apply the same kind of fix to every other matching spot in one click. */}
                   {applyablePatches.length > 1 ? (
@@ -389,6 +403,16 @@ export default async function IssueDetailPage({
                         ruleId={issue.ruleId}
                         patches={applyablePatches}
                         runtimeEnabled={runtimeEnabled}
+                      />
+                    </div>
+                  ) : null}
+                  {applyableCssPatches.length > 1 ? (
+                    <div className="mt-3">
+                      <ApplyAllCss
+                        siteId={issue.siteId}
+                        ruleId={issue.ruleId}
+                        patches={applyableCssPatches}
+                        cssEnabled={cssEnabled}
                       />
                     </div>
                   ) : null}
@@ -435,6 +459,7 @@ export default async function IssueDetailPage({
             siteId={issue.siteId}
             ruleId={issue.ruleId}
             runtimeEnabled={runtimeEnabled}
+            cssEnabled={cssEnabled}
           />
         ) : (
           <Panel>

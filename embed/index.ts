@@ -167,9 +167,24 @@
     "aria-hidden": true,
   };
 
+  // Phase D (experimental): the curated CSS properties an approved CSS fix may set. These DO change
+  // appearance — only ever served when the owner opted in — but we still re-check the allowlist
+  // client-side so a tampered/stale manifest can't set an arbitrary property.
+  const SAFE_CSS: Record<string, true> = {
+    color: true,
+    "background-color": true,
+    "min-width": true,
+    "min-height": true,
+    padding: true,
+    display: true,
+    outline: true,
+    "outline-offset": true,
+  };
+
   interface ManifestEntry {
     selector: string;
     patches: { attr: string; value: string }[];
+    css?: { prop: string; value: string }[];
   }
 
   function applyRemediations(): void {
@@ -197,6 +212,18 @@
                 if (!SAFE_ATTRS[p.attr]) continue; // re-check the safe allowlist client-side
                 try {
                   node.setAttribute(p.attr, p.value);
+                  applied = true;
+                } catch {
+                  /* never throw into host */
+                }
+              }
+              // Experimental CSS patches (only present when the owner opted in). Set with !important so
+              // the fix wins over the original rule; re-checked against the client-side allowlist.
+              for (const c of entry.css ?? []) {
+                if (!c || typeof c.prop !== "string" || typeof c.value !== "string") continue;
+                if (!SAFE_CSS[c.prop]) continue;
+                try {
+                  (node as HTMLElement).style.setProperty(c.prop, c.value, "important");
                   applied = true;
                 } catch {
                   /* never throw into host */
