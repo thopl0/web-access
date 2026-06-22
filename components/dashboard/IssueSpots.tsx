@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { Button } from "@/components/ui/Button";
-import { applyCssFixesToIssue, applyFixesToIssue, approveRemediation, setRuntimeRemediation, type CssPatchInput, type PatchInput } from "@/app/actions/remediation";
+import { applyCssFixesToIssue, applyFixesToIssue, applySuggestionsToIssue, approveRemediation, setRuntimeRemediation, type CssPatchInput, type PatchInput } from "@/app/actions/remediation";
 
 /**
  * Serializable description of one offending element instance. The page builds
@@ -209,7 +209,21 @@ function ApplyPatch({
             disabled={applied}
             className="mt-1 block w-full rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-2.5 py-1.5 text-sm text-fg"
           />
-          {hint ? <p className="mt-1 text-xs text-fg-soft">Suggested: {hint}</p> : null}
+          {hint ? (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-soft">
+              <span>Suggested: {hint}</span>
+              {!applied && value !== hint ? (
+                <button
+                  type="button"
+                  onClick={() => setValue(hint)}
+                  className="inline-flex items-center gap-1 font-bold text-blue underline underline-offset-2"
+                >
+                  <Sparkles className="size-3" aria-hidden strokeWidth={2.5} />
+                  Use AI suggestion
+                </button>
+              ) : null}
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="mt-2 text-xs text-fg-soft">
@@ -493,6 +507,83 @@ export function ApplyAllFixes({
           <Button type="button" variant="green" size="sm" onClick={apply} disabled={pending}>
             {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Zap className="size-4" aria-hidden strokeWidth={2.5} />}
             {pending ? "Applying…" : `Apply fix to all ${patches.length} spots`}
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <p role="alert" aria-live="assertive" className="mt-2 text-sm font-bold text-pink">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One-click "apply every AI suggestion for this issue" — the superset of ApplyAllFixes that ALSO covers
+ * spots whose fix is an AI-judgment placeholder (alt text, link names) that would otherwise force the
+ * owner to type each value one box at a time. It applies the AI's suggested value for every spot at once
+ * (`applySuggestionsToIssue` strips the "TODO:" marker) and asks the owner to review after, rather than
+ * before. Honest that the values are AI-generated and should be double-checked.
+ */
+export function ApplyAllSuggestions({
+  siteId,
+  ruleId,
+  patches,
+  reviewCount,
+  runtimeEnabled,
+}: {
+  siteId: string;
+  ruleId: string;
+  patches: PatchInput[];
+  /** How many of the spots carry an unreviewed AI value (vs. a concrete deterministic one). */
+  reviewCount: number;
+  runtimeEnabled: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ applied: number; skipped: number; fixed: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await applySuggestionsToIssue(siteId, ruleId, patches);
+      if (res.ok) {
+        setResult({ applied: res.applied ?? 0, skipped: res.skipped ?? 0, fixed: Boolean(res.fixed) });
+        router.refresh();
+      } else {
+        setError(res.error ?? "Couldn't apply these suggestions.");
+      }
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-blue/40 bg-blue/5 p-3">
+      <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue">
+        <Sparkles className="size-3.5" aria-hidden strokeWidth={2.5} />
+        Apply all AI suggestions
+      </p>
+      <p className="mt-1 text-xs text-fg-soft">
+        Applies the suggested value to all {patches.length} spots live in one click — no typing each one.{" "}
+        {reviewCount} {reviewCount === 1 ? "value is" : "values are"} AI-generated, so double-check them
+        after.{runtimeEnabled ? "" : " Applying turns on live fixes for this site."}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {result ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5 text-sm font-bold text-blue" role="status">
+            <Check className="size-4" aria-hidden strokeWidth={2.5} />
+            Applied {result.applied} AI {result.applied === 1 ? "suggestion" : "suggestions"} live
+            {result.fixed ? " · issue fixed" : ""}
+            {result.skipped > 0 ? (
+              <span className="font-normal text-fg-soft"> · {result.skipped} need a source change</span>
+            ) : null}
+            <span className="font-normal text-fg-soft"> — review them in the spots below.</span>
+          </span>
+        ) : (
+          <Button type="button" variant="blue" size="sm" onClick={apply} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden strokeWidth={2.5} />}
+            {pending ? "Applying…" : `Apply all ${patches.length} AI suggestions`}
           </Button>
         )}
       </div>

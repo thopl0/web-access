@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { logout } from "@/app/actions/auth";
+import { NotificationsBell } from "@/components/dashboard/NotificationsBell";
 import { SITE_NAME } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
@@ -265,10 +266,12 @@ function Brand() {
 export function AppShell({
   user,
   sites,
+  notificationsUnread = 0,
   children,
 }: {
   user: { name: string | null; email: string };
   sites: SiteNav[];
+  notificationsUnread?: number;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -302,7 +305,8 @@ export function AppShell({
             <SiteSwitcher sites={sites} current={current} pathname={pathname} />
           </div>
 
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1.5">
+            <NotificationsBell initialUnread={notificationsUnread} />
             <Link
               href="/dashboard/sites/new"
               className="hidden items-center gap-1.5 rounded-lg border border-[var(--color-panel-line-strong)] bg-surface px-3 py-1.5 text-sm font-bold text-fg no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--color-fg)_5%,transparent)] sm:inline-flex"

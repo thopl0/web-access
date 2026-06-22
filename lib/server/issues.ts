@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Finding, Impact, IssueStatus } from "@web-access/shared";
 import { db, schema } from "./db";
 import { getSitePages, rollupByRule, type RulePage } from "./report";
-import { SEVERITY_RANK, type Severity } from "@/lib/severity";
+import { SEVERITY_ORDER, SEVERITY_RANK, emptyCounts, type Severity, type SeverityCounts } from "@/lib/severity";
 
 /**
  * Cross-site issue model for the inbox. A "finding" is recreated on every scan, so to give owners a
@@ -173,6 +173,112 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
     return b.totalSpots - a.totalSpots;
   });
   return filtered;
+}
+
+/**
+ * Open-issue aggregates for the dashboard headline, the site cards, and the sidebar critical badge —
+ * deliberately computed with the SAME lifecycle logic as the Issues inbox (issueOverrides + ruleAutofix)
+ * so the numbers can never disagree with the list. (They used to: the overview summed RAW findings and
+ * so kept counting issues the owner had already fixed or auto-fixed — they vanished from the tab but not
+ * the headline.)
+ *
+ *  - `counts`  — open offending-element spots by severity, for the donut / score / severity bar.
+ *  - `types`   — distinct open issues (one per rule), the "N types of issues" headline number.
+ *  - `pages`   — distinct pages those open issues appear on, the "across M pages" line.
+ *  - `criticalTypes` — open issues at critical severity, for the "Critical" metric + sidebar badge.
+ *
+ * Returns the open `IssueRow[]` too, so the caller (the overview) doesn't have to re-scan the pages for
+ * conformance / quick-wins.
+ */
+export type OpenStats = {
+  counts: SeverityCounts;
+  types: number;
+  criticalTypes: number;
+  pages: number;
+};
+
+export function emptyOpenStats(): OpenStats {
+  return { counts: emptyCounts(), types: 0, criticalTypes: 0, pages: 0 };
+}
+
+export async function getOpenIssueOverview(
+  userId: string,
+  siteId?: string,
+): Promise<{ issues: IssueRow[]; total: OpenStats; bySite: Map<string, OpenStats> }> {
+  const sites = await ownedSites(userId, siteId);
+  const bySite = new Map<string, OpenStats>();
+  const total = emptyOpenStats();
+  const totalPages = new Set<string>();
+  if (sites.length === 0) return { issues: [], total, bySite };
+
+  const overrides = await overridesFor(sites.map((s) => s.id));
+  const autoFix = await autoFixRulesFor(sites.map((s) => s.id));
+  const issues: IssueRow[] = [];
+
+  for (const site of sites) {
+    const { pages } = await getSitePages(site.id, { evidence: false });
+    const lastSeenAt =
+      pages.reduce<string | null>((max, p) => (!max || p.scannedAt > max ? p.scannedAt : max), null);
+    const rollups = rollupByRule(pages);
+    const stats = emptyOpenStats();
+    const sitePages = new Set<string>();
+
+    for (const r of rollups) {
+      const key = `${site.id}:${r.ruleId}`;
+      const fingerprint = fingerprintPages(r.pages);
+      const eff = effectiveStatus(overrides.get(key), fingerprint);
+      const status = autoFix.has(key) ? "fixed" : eff.status;
+      if (status !== "open") continue; // fixed / muted / auto-fixed → excluded, exactly like the inbox
+
+      issues.push({
+        key,
+        siteId: site.id,
+        siteName: site.name,
+        ruleId: r.ruleId,
+        impact: r.impact,
+        message: r.message,
+        wcag: r.wcag,
+        source: r.source,
+        totalSpots: r.totalSpots,
+        pageCount: r.pageCount,
+        status: "open",
+        reopened: autoFix.has(key) ? false : eff.reopened,
+        lastSeenAt,
+        ...(r.helpUrl ? { helpUrl: r.helpUrl } : {}),
+      });
+
+      stats.types += 1;
+      const sev = (r.impact as Severity | null) ?? null;
+      if (sev && sev in SEVERITY_RANK) {
+        stats.counts[sev] += r.totalSpots;
+        stats.counts.total += r.totalSpots;
+        if (sev === "critical") stats.criticalTypes += 1;
+      }
+      // Distinct affected pages (a collapsed dynamic-route family counts as the one entry it folds to).
+      for (const p of r.pages) {
+        sitePages.add(p.url);
+        totalPages.add(`${site.id}\n${p.url}`);
+      }
+    }
+
+    stats.pages = sitePages.size;
+    bySite.set(site.id, stats);
+    total.types += stats.types;
+    total.criticalTypes += stats.criticalTypes;
+    for (const s of SEVERITY_ORDER) total.counts[s] += stats.counts[s];
+    total.counts.total += stats.counts.total;
+  }
+  total.pages = totalPages.size;
+
+  // Worst first, mirroring getUserIssues so QuickWins / conformance see a sensible order.
+  issues.sort((a, b) => {
+    const ra = a.impact ? SEVERITY_RANK[a.impact as Severity] : 99;
+    const rb = b.impact ? SEVERITY_RANK[b.impact as Severity] : 99;
+    if (ra !== rb) return ra - rb;
+    return b.totalSpots - a.totalSpots;
+  });
+
+  return { issues, total, bySite };
 }
 
 export type IssueDetail = {

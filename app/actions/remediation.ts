@@ -49,6 +49,11 @@ function isPlaceholder(value: string): boolean {
   return /^\s*todo\b/i.test(value) || value.trim().toLowerCase().startsWith("todo:");
 }
 
+/** Strip a leading "TODO:" marker so a placeholder fix becomes its bare AI-suggested value. */
+function stripTodo(value: string): string {
+  return value.replace(/^\s*todo:?\s*/i, "");
+}
+
 /** A single attribute patch the owner is applying (one spot's safe-attr fix). */
 export type PatchInput = { selector: string; attr: string; value: string };
 
@@ -66,6 +71,22 @@ function cleanPatch(input: PatchInput): { selector: string; attr: string; value:
 }
 
 /**
+ * Like cleanPatch, but for the bulk "apply AI suggestions" path: instead of rejecting a placeholder, it
+ * unwraps it to its bare AI suggestion ("TODO:" stripped) so the owner can accept all suggestions in one
+ * click and review after. Still allowlist-gated; still drops spots whose suggestion is empty (nothing
+ * real to propose).
+ */
+function cleanSuggestionPatch(input: PatchInput): { selector: string; attr: string; value: string } | null {
+  const selector = input.selector.trim();
+  const attr = input.attr.trim();
+  const value = stripTodo(input.value);
+  if (!selector) return null;
+  if (!isSafeRemediationAttr(attr)) return null;
+  if (attr !== "alt" && value.trim() === "") return null;
+  return { selector, attr, value };
+}
+
+/**
  * After patches land, decide whether the whole ISSUE is now covered by live fixes and, if so, mark it
  * "fixed" so it drops out of the open inbox (this is the link the dashboard was missing — applying a
  * fix used to leave the issue stuck "open"). "Fully covered" is honest: EVERY spot must carry a safe,
@@ -77,6 +98,12 @@ async function markIssueFixedIfFullyCovered(
   userId: string,
   siteId: string,
   ruleId: string,
+  /**
+   * When the owner applied AI suggestions in bulk, a spot counts as covered by its enabled remediation
+   * even though the issue-detail fix still carries the deterministic "TODO:" placeholder text — the live
+   * value the owner accepted is the real one. Off for the strict approval paths.
+   */
+  opts: { acceptAppliedPlaceholders?: boolean } = {},
 ): Promise<boolean> {
   const key = `${siteId}:${ruleId}`;
   const detail = await getIssueDetail(userId, key);
@@ -108,7 +135,9 @@ async function markIssueFixedIfFullyCovered(
       // No machine-applicable fix for this spot → can't be auto-fixed → issue isn't fully fixed.
       if (attrPatches.length === 0 && cssPatches.length === 0) return false;
       for (const p of attrPatches) {
-        if (isPlaceholder(p.value)) return false; // owner still has to supply a real value
+        // Owner still has to supply a real value — unless they accepted the AI suggestion in bulk, in
+        // which case the enabled remediation below is the value that counts.
+        if (!opts.acceptAppliedPlaceholders && isPlaceholder(p.value)) return false;
         if (!enabled.has(`attr\n${el.selector}\n${p.attr}`)) return false; // not applied yet
       }
       for (const p of cssPatches) {
@@ -235,6 +264,58 @@ export async function applyFixesToIssue(
   }
 
   const fixed = await markIssueFixedIfFullyCovered(userId, siteId, ruleId);
+  revalidateAfterApply(siteId, ruleId);
+  return { ok: true, applied, skipped, fixed };
+}
+
+/**
+ * Apply every AI-suggested value for an issue in one click — the "stop typing alt text one box at a
+ * time" path. Unlike applyFixesToIssue, placeholder spots aren't skipped: each one's bare AI suggestion
+ * (TODO marker stripped) is applied live, so the owner reviews the results after rather than typing each
+ * value before. Drops only spots whose suggestion is empty (no real proposal). Marks the issue "Fixed
+ * (live)" once every applyable spot is covered. Ownership- and plan-gated; attrs are allowlisted.
+ */
+export async function applySuggestionsToIssue(
+  siteId: string,
+  ruleId: string,
+  patches: PatchInput[],
+): Promise<RemediationActionResult & { applied?: number; skipped?: number; fixed?: boolean }> {
+  const { userId } = await verifySession();
+  const site = await ownedSite(siteId, userId);
+  if (!site) return { ok: false, error: "Site not found." };
+
+  if (!(await getUserEntitlements(userId)).runtimeRemediation) {
+    return { ok: false, error: "Upgrade to Pro to apply live fixes." };
+  }
+
+  // First live fix on a site with the master toggle off → turn it on so this stays one click.
+  if (!site.runtimeRemediation) {
+    await db.update(schema.sites).set({ runtimeRemediation: true }).where(eq(schema.sites.id, siteId));
+  }
+
+  let applied = 0;
+  let skipped = 0;
+  for (const raw of patches) {
+    const clean = cleanSuggestionPatch(raw);
+    if (!clean) {
+      skipped++;
+      continue;
+    }
+    await db
+      .insert(schema.remediations)
+      .values({ siteId, selector: clean.selector, attr: clean.attr, value: clean.value, enabled: true })
+      .onConflictDoUpdate({
+        target: [schema.remediations.siteId, schema.remediations.selector, schema.remediations.attr],
+        set: { value: clean.value, enabled: true },
+      });
+    applied++;
+  }
+
+  if (applied === 0) {
+    return { ok: false, error: "Nothing to apply — these spots have no AI suggestion or need a source change.", applied, skipped };
+  }
+
+  const fixed = await markIssueFixedIfFullyCovered(userId, siteId, ruleId, { acceptAppliedPlaceholders: true });
   revalidateAfterApply(siteId, ruleId);
   return { ok: true, applied, skipped, fixed };
 }

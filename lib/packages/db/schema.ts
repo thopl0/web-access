@@ -41,6 +41,9 @@ export const users = pgTable(
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
     planRenewsAt: timestamp("plan_renews_at", { withTimezone: true }),
+    // When the owner last opened the notifications bell. Anything that happened after this (a new
+    // crawl, newly-found issues) counts as "unread". Null = never opened → everything recent is unread.
+    notificationsSeenAt: timestamp("notifications_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

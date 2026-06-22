@@ -15,6 +15,7 @@ import {
   severityLabel,
 } from "@/components/dashboard/severity";
 import { SEVERITY_ORDER, type SiteSummary } from "@/lib/server/report";
+import { type OpenStats } from "@/lib/server/issues";
 
 /** Compact "last scanned" line — date only; the detail view has the precise time. */
 function formatScanned(iso: string): string {
@@ -28,10 +29,13 @@ function formatScanned(iso: string): string {
 export function SiteCard({
   site,
   summary,
+  open,
   snippet,
 }: {
   site: { id: string; name: string; origin: string | null; status: SiteStatus };
   summary: SiteSummary;
+  /** Open-issue figures (lifecycle-aware), so the card matches the Issues tab — not raw scan counts. */
+  open: OpenStats;
   snippet: string;
 }) {
   const reportHref = `/dashboard/${site.id}`;
@@ -61,7 +65,7 @@ export function SiteCard({
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {verified && scanned ? (
-            <ScoreBadge counts={summary.counts} pageCount={summary.pageCount} size="sm" />
+            <ScoreBadge counts={open.counts} pageCount={summary.pageCount} size="sm" />
           ) : null}
           <SiteStatusChip status={site.status} />
           {verified ? <StatusChip status={summary.status} /> : null}
@@ -80,23 +84,25 @@ export function SiteCard({
       ) : (
       /* At-a-glance posture */
       <div className="mt-5">
-        <SeverityBar counts={summary.counts} muted={!scanned} />
+        <SeverityBar counts={open.counts} muted={!scanned} />
         {scanned ? (
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            <span className="font-bold text-fg">
-              {summary.counts.total} {summary.counts.total === 1 ? "issue" : "issues"}
-            </span>
-            {SEVERITY_ORDER.filter((s) => summary.counts[s] > 0).map((s) => (
+            {open.types > 0 ? (
+              <span className="font-bold text-fg">
+                {open.types} {open.types === 1 ? "issue" : "issues"} across {open.pages}{" "}
+                {open.pages === 1 ? "page" : "pages"}
+              </span>
+            ) : (
+              <span className="font-bold text-fg">No open issues 🎉</span>
+            )}
+            {SEVERITY_ORDER.filter((s) => open.counts[s] > 0).map((s) => (
               <span key={s} className="inline-flex items-center gap-1.5 text-fg-soft">
                 <SeverityDot severity={s} />
-                {summary.counts[s]} {severityLabel(s).toLowerCase()}
+                {open.counts[s]} {severityLabel(s).toLowerCase()}
               </span>
             ))}
-            {summary.counts.total === 0 ? (
-              <span className="text-fg-soft">No issues found 🎉</span>
-            ) : null}
             <span className="text-fg-soft">
-              · {summary.pageCount} {summary.pageCount === 1 ? "page" : "pages"}
+              · {summary.pageCount} {summary.pageCount === 1 ? "page" : "pages"} monitored
             </span>
             {summary.lastScannedAt ? (
               <span className="text-fg-soft">· scanned {formatScanned(summary.lastScannedAt)}</span>

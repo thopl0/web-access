@@ -16,7 +16,7 @@ import { db, schema } from "@/lib/server/db";
 import { appOrigin } from "@/lib/server/origin";
 import { embedSnippet } from "@/lib/embed";
 import { getIssuesTrend, getSiteSummaries, type SiteSummary } from "@/lib/server/report";
-import { getUserIssues } from "@/lib/server/issues";
+import { getOpenIssueOverview, emptyOpenStats } from "@/lib/server/issues";
 import { summarizeConformance } from "@/lib/wcag";
 import { emptyCounts, type SeverityCounts } from "@/lib/severity";
 
@@ -44,24 +44,19 @@ export default async function DashboardPage() {
   const summaries = await getSiteSummaries(sites.map((s) => s.id));
   const rows = sites.map((s) => summaries.get(s.id) ?? EMPTY_SUMMARY);
 
-  // Portfolio rollups.
-  const portfolio: SeverityCounts = rows.reduce((acc, s) => {
-    acc.critical += s.counts.critical;
-    acc.serious += s.counts.serious;
-    acc.moderate += s.counts.moderate;
-    acc.minor += s.counts.minor;
-    acc.total += s.counts.total;
-    return acc;
-  }, emptyCounts());
   const pagesMonitored = rows.reduce((n, s) => n + s.pageCount, 0);
-  const sitesWithIssues = rows.filter((s) => s.counts.total > 0).length;
   const sitesScanned = rows.filter((s) => s.pageCount > 0).length;
 
   const hasSites = sites.length > 0;
   const pendingSites = sites.filter((s) => s.status === "pending");
 
-  // Open issues across all sites — powers the WCAG/EAA conformance summary (and quick wins).
-  const openIssues = hasSites ? await getUserIssues(user!.id, { view: "open" }) : [];
+  // Open-issue figures, computed with the same lifecycle logic as the Issues tab so the headline can't
+  // disagree with the list (fixed / auto-fixed issues are excluded). `portfolio` is open spots by
+  // severity for the donut/score; `openStats` carries the "N types across M pages" headline numbers.
+  const { issues: openIssues, total: openStats, bySite: openBySite } = hasSites
+    ? await getOpenIssueOverview(user!.id)
+    : { issues: [], total: emptyOpenStats(), bySite: new Map() };
+  const portfolio: SeverityCounts = openStats.counts;
   const conformance = summarizeConformance(openIssues, { evaluated: pagesMonitored > 0 });
 
   // 14-day issues-found trend (distinct issues, de-duped across re-scans) + WoW delta.
@@ -80,17 +75,20 @@ export default async function DashboardPage() {
     { label: "Sites", value: sites.length, hint: `${sitesScanned} scanned` },
     { label: "Pages monitored", value: pagesMonitored, hint: "Auto-scanned" },
     {
-      label: "Open issues",
-      value: portfolio.total,
+      label: openStats.types === 1 ? "Open issue" : "Open issues",
+      value: openStats.types,
       href: "/dashboard/issues",
-      hint: portfolio.total > 0 ? `Across ${sitesWithIssues} ${sitesWithIssues === 1 ? "site" : "sites"}` : "All clear 🎉",
+      hint:
+        openStats.types > 0
+          ? `Across ${openStats.pages} ${openStats.pages === 1 ? "page" : "pages"}`
+          : "All clear 🎉",
     },
     {
       label: "Critical",
-      value: portfolio.critical,
+      value: openStats.criticalTypes,
       href: "/dashboard/issues?severity=critical",
-      ...(portfolio.critical > 0 ? { severity: "critical" as const } : {}),
-      hint: portfolio.critical > 0 ? "Need urgent fixes" : "None open",
+      ...(openStats.criticalTypes > 0 ? { severity: "critical" as const } : {}),
+      hint: openStats.criticalTypes > 0 ? "Need urgent fixes" : "None open",
     },
   ];
 
@@ -199,7 +197,7 @@ export default async function DashboardPage() {
           <Section title="Your sites" action={<span className="text-sm text-fg-soft">{sites.length}</span>}>
             <ul className="flex flex-col gap-5">
               {sites.map((site) => (
-                <SiteCard key={site.id} site={site} summary={summaries.get(site.id) ?? EMPTY_SUMMARY} snippet={embedSnippet(origin, site.id)} />
+                <SiteCard key={site.id} site={site} summary={summaries.get(site.id) ?? EMPTY_SUMMARY} open={openBySite.get(site.id) ?? emptyOpenStats()} snippet={embedSnippet(origin, site.id)} />
               ))}
             </ul>
           </Section>

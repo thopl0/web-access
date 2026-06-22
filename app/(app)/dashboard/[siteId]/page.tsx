@@ -202,26 +202,18 @@ export default async function SiteReportsPage({
             </div>
           </Panel>
 
-          {/* "Start here": the plain-English summary + legal-risk triage — the first thing an owner
-              should read. Sits above the board so "what to fix first" leads the report. */}
-          {startHere ? (
-            <div className="mt-8">
-              <StartHere startHere={startHere} />
-            </div>
-          ) : null}
-
           {/* Verification loop: what the latest re-scan CONFIRMS was fixed (and what's newly
-              introduced). Self-suppresses on a first scan or when nothing changed. */}
+              introduced) — a short, actionable change-feed kept near the top. Self-suppresses on a
+              first scan or when nothing changed. */}
           {scanDelta?.hasPrevious && (scanDelta.resolved.length > 0 || scanDelta.introduced.length > 0) ? (
-            <div className={startHere ? "mt-6" : "mt-8"}>
+            <div className="mt-6">
               <ChangesSinceLastScan delta={scanDelta} />
             </div>
           ) : null}
 
-          {/* Free owners (fixes withheld): lead with what Pro adds, right where they've just read
-              "what to fix first" — so the next step is upgrading to actually fix it. */}
+          {/* Free owners (fixes withheld): lead with what Pro adds so the next step is upgrading. */}
           {fixesLocked ? (
-            <div className={startHere ? "mt-6" : "mt-8"}>
+            <div className="mt-6">
               <ProUpsell />
             </div>
           ) : null}
@@ -245,6 +237,15 @@ export default async function SiteReportsPage({
             delta={delta}
             lastScanLabel={lastScan ? fmtDay(lastScan.slice(0, 10)) : "—"}
           />
+
+          {/* "What to fix first": the plain-English summary + legal-risk triage. Demoted below the
+              issues list + screenshot board so the report leads with the findings themselves, not a
+              wall of AI prose up top. */}
+          {startHere ? (
+            <div className="mt-10">
+              <StartHere startHere={startHere} />
+            </div>
+          ) : null}
 
           {/* Conformance: a slim read-out that links to the full WCAG checklist tab. */}
           <Section title="Conformance">

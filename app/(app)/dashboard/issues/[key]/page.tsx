@@ -10,7 +10,7 @@ import { IssueActions } from "@/components/dashboard/IssueActions";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { ruleTitle } from "@/components/dashboard/IssueDetail";
 import { AnnotatedShot } from "@/components/dashboard/AnnotatedShot";
-import { ApplyAllCss, ApplyAllFixes, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
+import { ApplyAllCss, ApplyAllFixes, ApplyAllSuggestions, FixBlock, IssueSpots, type SpotElement, type SpotPage, type SpotPattern } from "@/components/dashboard/IssueSpots";
 import { and, eq } from "drizzle-orm";
 
 import { AutoFixToggle } from "@/components/dashboard/AutoFixToggle";
@@ -250,6 +250,26 @@ export default async function IssueDetailPage({
     }
   }
 
+  // Superset of the above that ALSO includes placeholder spots, unwrapped to their bare AI suggestion
+  // (the "TODO:" marker stripped). This is the payload for one-click "apply all AI suggestions" — the
+  // owner accepts every suggested value at once and reviews after, instead of typing each box first.
+  // Spots whose suggestion is empty after stripping are dropped (no real proposal to apply).
+  const stripTodo = (v: string) => v.replace(/^\s*todo:?\s*/i, "");
+  const applyableSuggestions: { selector: string; attr: string; value: string }[] = [];
+  const seenSuggestion = new Set<string>();
+  let reviewSuggestionCount = 0;
+  for (const i of instances) {
+    for (const p of i.el.fix?.attributePatch ?? []) {
+      const k = `${i.el.selector}\n${p.attr}`;
+      if (seenSuggestion.has(k)) continue;
+      const value = stripTodo(p.value);
+      if (p.attr !== "alt" && value.trim() === "") continue; // nothing concrete to suggest
+      seenSuggestion.add(k);
+      applyableSuggestions.push({ selector: i.el.selector, attr: p.attr, value });
+      if (isPlaceholderValue(p.value)) reviewSuggestionCount++;
+    }
+  }
+
   // Experimental CSS patches that can be applied live (contrast/target-size), one per selector+prop.
   const applyableCssPatches: { selector: string; prop: string; value: string }[] = [];
   const seenCss = new Set<string>();
@@ -395,8 +415,21 @@ export default async function IssueDetailPage({
                     runtimeEnabled={runtimeEnabled}
                     cssEnabled={cssEnabled}
                   />
-                  {/* Bulk path: apply the same kind of fix to every other matching spot in one click. */}
-                  {applyablePatches.length > 1 ? (
+                  {/* Bulk path: apply the same kind of fix to every other matching spot in one click.
+                      When some spots are AI-judgment placeholders that would otherwise force per-box
+                      typing, offer the superset "apply all AI suggestions" instead (accept-all,
+                      review-after); otherwise the plain concrete-value "apply to all". */}
+                  {reviewSuggestionCount > 0 && applyableSuggestions.length > 1 ? (
+                    <div className="mt-3">
+                      <ApplyAllSuggestions
+                        siteId={issue.siteId}
+                        ruleId={issue.ruleId}
+                        patches={applyableSuggestions}
+                        reviewCount={reviewSuggestionCount}
+                        runtimeEnabled={runtimeEnabled}
+                      />
+                    </div>
+                  ) : applyablePatches.length > 1 ? (
                     <div className="mt-3">
                       <ApplyAllFixes
                         siteId={issue.siteId}
