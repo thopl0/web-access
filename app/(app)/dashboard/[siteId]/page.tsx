@@ -12,6 +12,7 @@ import { InstallInstructions } from "@/components/dashboard/InstallInstructions"
 import { VerifyPanel } from "@/components/dashboard/VerifyPanel";
 import { SiteOverview } from "@/components/dashboard/SiteOverview";
 import { ScoreBadge } from "@/components/dashboard/ScoreBadge";
+import { DeltaChip, SeverityDonut, TrendArea } from "@/components/dashboard/charts";
 import type { BoardPage } from "@/components/dashboard/SiteBoard";
 import { CodeChip, EmptyState, PageHeader, Panel } from "@/components/dashboard/ui";
 import { PageShell, Section } from "@/components/dashboard/layout";
@@ -264,6 +265,48 @@ export default async function SiteReportsPage({
             </div>
           </Panel>
 
+          {/* At-a-glance health — pulled up so the trend + severity mix sit near the top, not buried
+              below the issues list. Site-level (the per-page rescoping stays with the board lower down).
+              Score isn't repeated here — the headline panel above already shows it. */}
+          <Section title="Accessibility health" className="mt-8">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Panel className="lg:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-display text-sm font-bold uppercase tracking-wide text-fg-soft">
+                      Issues found
+                    </p>
+                    <p className="text-xs text-fg-soft">Last 14 days</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-display text-2xl font-bold tabular-nums text-fg">{found}</p>
+                    <DeltaChip delta={delta} />
+                  </div>
+                </div>
+                <div className="mt-5">
+                  <TrendArea points={trend} />
+                  <div className="mt-2 flex items-center justify-between text-xs text-fg-soft">
+                    <span>{trend.length ? fmtDay(trend[0].date) : ""}</span>
+                    <span className="flex items-center gap-3">
+                      <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full bg-blue" /> Issues</span>
+                      <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full bg-pink" /> Critical</span>
+                    </span>
+                    <span>{trend.length ? fmtDay(trend[trend.length - 1].date) : ""}</span>
+                  </div>
+                </div>
+              </Panel>
+
+              <Panel>
+                <p className="font-display text-sm font-bold uppercase tracking-wide text-fg-soft">
+                  Severity breakdown
+                </p>
+                <div className="mt-4">
+                  <SeverityDonut counts={typeCounts} unitLabel="issue type" />
+                </div>
+              </Panel>
+            </div>
+          </Section>
+
           {/* Verification loop: what the latest re-scan CONFIRMS was fixed (and what's newly
               introduced) — a short, actionable change-feed kept near the top. Self-suppresses on a
               first scan or when nothing changed. */}
@@ -288,16 +331,12 @@ export default async function SiteReportsPage({
             <SiteReport rules={rules} pages={pages} counts={typeCounts} siteId={siteId} />
           </Section>
 
-          {/* Demoted "Your pages" board + the metric band and health/trend panel, which re-scope to a
-              page when one is opened. Sits below the issues so it's an explorer, not a scroll-wall. */}
+          {/* "Your pages" board + its metric band, which re-scopes to a page when one is opened. Sits
+              below the issues so it's an explorer, not a scroll-wall. */}
           <SiteOverview
             pages={boardPages}
             siteCounts={counts}
-            siteTypeCounts={typeCounts}
             pageCount={pages.length}
-            trend={trend}
-            found={found}
-            delta={delta}
             lastScanLabel={lastScan ? fmtDay(lastScan.slice(0, 10)) : "—"}
           />
 
