@@ -107,8 +107,11 @@ async function overridesFor(siteIds: string[]) {
 }
 
 export type IssueFilters = {
-  /** "open" (default) shows open + reopened; "muted" shows resolved/ignored; "all" shows everything. */
-  view?: "open" | "muted" | "all";
+  /**
+   * "open" (default) shows open + reopened; "muted" shows owner-muted (resolved/ignored/snoozed);
+   * "fixed" shows auto-fixed + live-fixed (status "fixed"); "all" shows everything.
+   */
+  view?: "open" | "muted" | "fixed" | "all";
   severity?: Severity;
   siteId?: string;
 };
@@ -163,7 +166,11 @@ export async function getUserIssues(userId: string, filters: IssueFilters = {}):
   const view = filters.view ?? "open";
   const filtered = rows.filter((r) => {
     if (view === "open" && r.status !== "open") return false;
-    if (view === "muted" && r.status === "open") return false;
+    // "muted" is owner-muted only; auto-fixed / live-fixed ("fixed") get their own view.
+    if (view === "muted" && !(r.status === "resolved" || r.status === "ignored" || r.status === "snoozed")) {
+      return false;
+    }
+    if (view === "fixed" && r.status !== "fixed") return false;
     if (filters.severity && r.impact !== filters.severity) return false;
     return true;
   });

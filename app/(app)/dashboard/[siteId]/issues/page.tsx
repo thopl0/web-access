@@ -35,7 +35,8 @@ export default async function SiteIssuesPage({
   if (!site) notFound();
 
   const sp = await searchParams;
-  const view = sp.view === "muted" || sp.view === "all" ? sp.view : "open";
+  const view =
+    sp.view === "muted" || sp.view === "fixed" || sp.view === "all" ? sp.view : "open";
   const severity =
     sp.severity && (SEVERITY_ORDER as readonly string[]).includes(sp.severity)
       ? (sp.severity as Severity)
@@ -48,7 +49,7 @@ export default async function SiteIssuesPage({
   const critical = issues.filter((i) => i.impact === "critical").length;
   const serious = issues.filter((i) => i.impact === "serious").length;
   const metrics: Metric[] = [
-    { label: "Showing", value: issues.length, hint: view === "open" ? "Open issues" : view === "muted" ? "Resolved / ignored" : "All issues" },
+    { label: "Showing", value: issues.length, hint: view === "open" ? "Open issues" : view === "fixed" ? "Auto-fixed" : view === "muted" ? "Resolved / ignored" : "All issues" },
     { label: "Open", value: open },
     { label: "Critical", value: critical, ...(critical > 0 ? { severity: "critical" as const } : {}) },
     { label: "Serious", value: serious, ...(serious > 0 ? { severity: "serious" as const } : {}) },

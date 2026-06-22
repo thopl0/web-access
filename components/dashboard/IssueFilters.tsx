@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 const VIEWS = [
   { id: "open", label: "Open" },
+  { id: "fixed", label: "Auto-fixed" },
   { id: "muted", label: "Resolved / ignored" },
   { id: "all", label: "All" },
 ];

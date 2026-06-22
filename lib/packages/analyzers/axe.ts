@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "playwright";
-import type { NodeResult, Result as AxeResult } from "axe-core";
+import type { Result as AxeResult } from "axe-core";
 import type { CssPatch, Finding, Impact } from "@web-access/shared";
 
 /**
@@ -18,7 +18,7 @@ import type { CssPatch, Finding, Impact } from "@web-access/shared";
  * read-only suggestion in the report, never a live patch, until we can verify a fix against the
  * rendered page (opacity + actual background).
  */
-function cssFixFor(ruleId: string, node: NodeResult): CssPatch[] | undefined {
+function cssFixFor(ruleId: string): CssPatch[] | undefined {
   if (ruleId === "target-size") {
     return [
       { prop: "min-width", value: "24px" },
@@ -75,7 +75,7 @@ export function mapAxeViolations(violations: AxeResult[]): Finding[] {
   for (const v of violations) {
     const wcag = extractWcag(v.tags);
     for (const node of v.nodes) {
-      const cssFix = cssFixFor(v.id, node);
+      const cssFix = cssFixFor(v.id);
       findings.push({
         ruleId: v.id,
         source: "axe",

@@ -54,3 +54,61 @@ export async function setIssueStatus(key: string, status: string): Promise<Issue
   revalidatePath(`/dashboard/${siteId}`);
   return { ok: true, status: next };
 }
+
+/**
+ * Bulk version of {@link setIssueStatus} — set the same status on many issues at once (the inbox's
+ * "turn off selected" / "reopen selected"). Ownership is checked per key against the caller's sites;
+ * keys for sites they don't own are silently skipped. Revalidates each touched surface once.
+ */
+export async function setIssuesStatus(
+  keys: string[],
+  status: string,
+): Promise<{ ok: boolean; updated: number; message?: string }> {
+  const { userId } = await verifySession();
+
+  const parsed = IssueStatus.safeParse(status);
+  if (!parsed.success) return { ok: false, updated: 0, message: "Invalid status." };
+  const next = parsed.data;
+
+  const owned = new Set(
+    (
+      await db
+        .select({ id: schema.sites.id })
+        .from(schema.sites)
+        .where(eq(schema.sites.ownerId, userId))
+    ).map((r) => r.id),
+  );
+
+  const touchedSites = new Set<string>();
+  let updated = 0;
+  for (const key of keys) {
+    const sep = key.indexOf(":");
+    if (sep < 0) continue;
+    const siteId = key.slice(0, sep);
+    if (!owned.has(siteId)) continue;
+
+    if (next === "open") {
+      await db
+        .delete(schema.issueOverrides)
+        .where(and(eq(schema.issueOverrides.siteId, siteId), eq(schema.issueOverrides.issueKey, key)));
+    } else {
+      const fingerprint = await computeIssueFingerprint(userId, key);
+      await db
+        .insert(schema.issueOverrides)
+        .values({ siteId, issueKey: key, status: next, fingerprint, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: [schema.issueOverrides.siteId, schema.issueOverrides.issueKey],
+          set: { status: next, fingerprint, updatedAt: new Date() },
+        });
+    }
+    updated++;
+    touchedSites.add(siteId);
+  }
+
+  revalidatePath("/dashboard/issues");
+  for (const siteId of touchedSites) {
+    revalidatePath(`/dashboard/${siteId}`);
+    revalidatePath(`/dashboard/${siteId}/issues`);
+  }
+  return { ok: true, updated };
+}
