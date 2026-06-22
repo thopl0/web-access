@@ -210,7 +210,17 @@ export default async function IssueDetailPage({
   }));
 
   // --- Canonical example, pinned at the top (the single best across the issue). ---
-  const hero = instances.length ? bestOf(instances) : null;
+  // Prefer a spot whose fix can be applied live, so the top "The fix" panel surfaces the
+  // "Apply as live fix" control whenever the issue has one (otherwise an applyable spot can hide
+  // deep in the list). Among applyable spots — or all spots when none is — pick the richest evidence.
+  const applyable = instances.filter(
+    (i) => i.el.fix?.attributePatch && i.el.fix.attributePatch.length > 0,
+  );
+  const hero = applyable.length
+    ? bestOf(applyable)
+    : instances.length
+      ? bestOf(instances)
+      : null;
   const heroSpot = hero ? toSpotElement(hero.el, hero.shot) : null;
 
   // Meta strip facts.
