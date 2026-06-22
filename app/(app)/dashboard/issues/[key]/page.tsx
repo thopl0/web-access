@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ExternalLink, Inbox, Sparkles } from "lucide-react";
+import { ExternalLink, Inbox, Sparkles, Zap } from "lucide-react";
 
 import { BackLink, EmptyState, PageHeader, Panel } from "@/components/dashboard/ui";
 import { PageShell, Section } from "@/components/dashboard/layout";
@@ -258,6 +258,17 @@ export default async function IssueDetailPage({
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {/* Jump straight to the live-fix control — it sits below the fold in "The fix" panel, so
+                surface a header CTA whenever this issue actually has an applyable patch. */}
+            {applyable.length > 0 ? (
+              <a
+                href="#apply-live-fix"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-green/50 bg-green/5 px-3 py-1.5 text-sm font-bold text-green no-underline transition-colors hover:bg-green/10"
+              >
+                <Zap className="size-4" aria-hidden strokeWidth={2.5} />
+                Apply live fix
+              </a>
+            ) : null}
             <IssueActions issueKey={issue.key} status={issue.status} />
             <CopyButton
               text={aiPrompt}
@@ -333,14 +344,17 @@ export default async function IssueDetailPage({
               ) : null}
 
               {/* Primary action above the fold: the concrete fix + apply control for the lead spot,
-                  reusing the same FixBlock the per-spot cards render below. */}
+                  reusing the same FixBlock the per-spot cards render below. The id is the scroll
+                  target for the header's "Apply live fix" jump; scroll-mt clears the sticky header. */}
               {heroSpot?.fix ? (
-                <FixBlock
-                  fix={heroSpot.fix}
-                  selector={heroSpot.selector}
-                  siteId={issue.siteId}
-                  runtimeEnabled={runtimeEnabled}
-                />
+                <div id="apply-live-fix" className="scroll-mt-28">
+                  <FixBlock
+                    fix={heroSpot.fix}
+                    selector={heroSpot.selector}
+                    siteId={issue.siteId}
+                    runtimeEnabled={runtimeEnabled}
+                  />
+                </div>
               ) : null}
 
               <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-panel-line)] pt-4">
