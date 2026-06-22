@@ -80,12 +80,19 @@ export default async function IssueDetailPage({
   params: Promise<{ key: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { key } = await params;
+  const { key: rawKey } = await params;
   const { from } = await searchParams;
   const { userId } = await verifySession();
 
-  // `key` arrives already URL-decoded by Next's route matcher, so we do NOT decode it again — a second
-  // decodeURIComponent would corrupt any value whose decoded form still contains a literal '%'.
+  // This Next build does NOT URL-decode dynamic route params, so the ':' in our "siteId:ruleId" key
+  // arrives as %3A — we must decode before getIssueDetail splits on ':'. The try/catch guards a
+  // malformed escape; for our keys (no literal '%') decoding an already-decoded value is a no-op.
+  let key = rawKey;
+  try {
+    key = decodeURIComponent(rawKey);
+  } catch {
+    key = rawKey;
+  }
   const issue = await getIssueDetail(userId, key);
 
   // A validly-linked issue can disappear between the list rendering and the click: a re-scan may have
